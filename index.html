@@ -1784,6 +1784,25 @@ function renderDashboard(){
   for(let r=0;r<G.results.length;r++){const arr=G.results[r];if(!arr)continue;const m=arr.find(x=>x.h===G.user||x.a===G.user);if(m){const isH=m.h===G.user;const gf=isH?m.hs:m.as,ga=isH?m.as:m.hs;myResults.push(gf>ga?"win":gf<ga?"loss":"draw");}}
   const form=myResults.slice(-5).map(r=>`<span class="pill ${r}">${r==="win"?"勝":r==="loss"?"敗":"分"}</span>`).join(" ")||`<span class="tiny muted">まだ試合がありません</span>`;
   const tbl=standings();const myPos=tbl.findIndex(c=>c.idx===G.user)+1;const me2=tbl[myPos-1];
+  // 最新号の簡易記事（クリックで新聞欄へ）
+  let npCard="";
+  const np=G.prophet&&G.prophet[0];
+  if(np){
+    const lead=np.sections.find(s=>s.kind==="lead");
+    const arts=np.sections.filter(s=>s.kind==="article");
+    const label=np.type==="preseason"?"開幕前特別号":np.type==="draft"?"ドラフト特集号":`第${np.wk}節`;
+    const excerpt=lead?lead.html.replace(/<[^>]+>/g,"").slice(0,108):"";
+    const subs=arts.slice(0,3).map(a=>`<span class="pill" style="margin:2px 5px 0 0">${a.title}</span>`).join("");
+    npCard=`<div class="card" style="margin-top:16px;cursor:pointer;border-color:var(--gold-soft)" data-prophet="0">
+      <div class="card-h"><h3>📰 日刊預言者新聞 ・ クィディッチ欄</h3><span class="tiny gold">${label} ・ 紙面を読む ▶</span></div>
+      <div class="card-b">
+        <div style="font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--aqua);font-weight:800">${lead?lead.lab||"最新号":"最新号"}</div>
+        <div style="font-family:Georgia,'Times New Roman',serif;font-size:19px;font-weight:700;line-height:1.3;margin:3px 0 6px">${lead?lead.title:"最新号"}</div>
+        <p class="tiny muted" style="line-height:1.65;margin:0 0 ${subs?"9px":"0"}">${excerpt}${excerpt?"…":""}</p>
+        ${subs?`<div style="display:flex;flex-wrap:wrap;gap:2px"><span class="tiny muted" style="align-self:center;margin-right:4px">他の記事:</span>${subs}</div>`:""}
+      </div>
+    </div>`;
+  }
 
   return `
   <div class="grid cols-2">
@@ -1808,6 +1827,7 @@ function renderDashboard(){
       </div>
     </div>
   </div>
+  ${npCard}
   ${(G.offers&&G.offers.length)?`<div class="card" style="margin-top:16px;border-color:var(--gold)"><div class="card-h"><h3>📨 トレードオファー受信中</h3><span class="pill" style="color:var(--gold);border-color:var(--gold-soft)">${G.offers.length}件</span></div><div class="card-b"><p class="muted" style="margin-top:0">他クラブからトレードの打診が届いています。</p><button class="btn gold" data-view="trade">トレード画面で確認 ▶</button></div></div>`:""}
   <div class="card" style="margin-top:16px">
     <div class="card-h"><h3>クラブニュース</h3></div>
