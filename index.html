@@ -1711,6 +1711,7 @@ function render(){
     case "fixtures":body=renderFixtures();break;
     case "rankings":body=renderRankings();break;
     case "contracts":body=renderContracts();break;
+    case "search":body=renderSearch();break;
     case "prophet":body=renderProphet();break;
     case "awards":body=renderAwards();break;
     case "prospects":body=renderProspectRanking();break;
@@ -1726,7 +1727,7 @@ function renderShell(body){
   const club=G.clubs[G.user];
   const table=standings();
   const myPos=table.findIndex(c=>c.idx===G.user)+1;
-  const navItems=[["dashboard","ダッシュボード"],["prophet","新聞"],["squad","スカッド"],["tactics","戦術"],["transfers","移籍市場"],["trade","トレード"],["contracts","契約"],["table","順位表"],["rankings","ランキング"],["awards","アワード"],["prospects","新人候補"],["fixtures","日程"]];
+  const navItems=[["dashboard","ダッシュボード"],["prophet","新聞"],["squad","スカッド"],["tactics","戦術"],["transfers","移籍市場"],["trade","トレード"],["search","選手検索"],["contracts","契約"],["table","順位表"],["rankings","ランキング"],["awards","アワード"],["prospects","新人候補"],["fixtures","日程"]];
   if(G.phase==="draft")navItems.push(["draft","ドラフト"]);
   else if(G.phase!=="regular")navItems.push(["playoff","プレーオフ"]);
   app().innerHTML=`
@@ -2319,6 +2320,60 @@ function contractProjection(club){
   club.squad.forEach(p=>{const y=p.years||1;for(let o=0;o<4;o++){if(o<y)yrs[o]+=(p.salary||0);}});
   return yrs;
 }
+/* ---- 選手検索 ---- */
+function searchPool(){
+  const arr=[];
+  G.clubs.forEach(c=>c.squad.forEach(p=>arr.push({p,where:c.name,clubIdx:c.idx})));
+  (G.market||[]).forEach(p=>arr.push({p,where:"フリー（市場）",clubIdx:null}));
+  return arr;
+}
+function searchFilter(){
+  const s=G.search||{};const q=(s.q||"").trim();
+  return searchPool().filter(x=>{
+    if(s.pos&&x.p.pos!==s.pos)return false;
+    if(s.nat&&x.p.nat!==s.nat)return false;
+    if(s.minOvr&&overall(x.p)<s.minOvr)return false;
+    if(q&&!x.p.name.includes(q))return false;
+    return true;
+  }).sort((a,b)=>overall(b.p)-overall(a.p)).slice(0,80);
+}
+function searchResultsInner(){
+  const list=searchFilter();
+  const rows=list.map(x=>{const p=x.p;const o=overall(p);return `<tr>
+    <td><span class="ovr ${ovrTier(o)}">${o}</span></td>
+    <td><div style="display:flex;align-items:center;gap:9px"><span class="ava">${avatarSVG(p,32,x.clubIdx!=null?clubColors(x.clubIdx):null)}</span>
+      <div><div class="player-name">${p.name}${p.star?' <span class="gold">★</span>':''}</div><div class="tiny muted">${POS[p.pos].name} ・ ${p.age}歳${p.inj>0?' ・ <span class="quaffle">負傷</span>':''}</div></div></div></td>
+    <td class="center"><span class="pos ${p.pos}">${POS[p.pos].short}</span></td>
+    <td>${flag(p.nat)} ${p.nat}</td>
+    <td class="tiny">${x.where}</td>
+    <td class="num">${gold(p.value)}</td>
+  </tr>`;}).join("");
+  return `<div class="tiny muted" style="padding:6px 2px">${list.length}名がヒット${list.length>=80?'（OVR上位80名を表示）':''}</div>
+    <div class="card"><div class="card-b" style="padding:0;overflow-x:auto"><table>
+    <thead><tr><th>OVR</th><th>選手</th><th class="center">位置</th><th>国籍</th><th>所属</th><th class="num">評価額</th></tr></thead>
+    <tbody>${rows||'<tr><td colspan="6" class="center muted" style="padding:24px">条件に合う選手がいません。</td></tr>'}</tbody></table></div></div>`;
+}
+function renderSearch(){
+  G.search=G.search||{q:"",nat:"",pos:"",minOvr:0};
+  const s=G.search;
+  const nats=[...new Set(searchPool().map(x=>x.p.nat))].sort();
+  const natOpts=`<option value="">全ての国籍</option>`+nats.map(n=>`<option value="${n}" ${s.nat===n?'selected':''}>${n}</option>`).join("");
+  const posBtns=[["","全位置"],["CH","CH"],["BE","BE"],["KE","KE"],["SE","SE"]].map(([k,l])=>`<button data-searchpos="${k}" class="${(s.pos||"")===k?'on':''}">${l}</button>`).join("");
+  const ovrBtns=[[0,"指定なし"],[60,"60+"],[70,"70+"],[80,"80+"],[85,"85+"]].map(([v,l])=>`<button data-searchovr="${v}" class="${(s.minOvr||0)===v?'on':''}">${l}</button>`).join("");
+  return `<p class="eyebrow">選手検索</p>
+  <p class="tiny muted" style="margin-top:-4px">リーグ全選手とフリー選手を、名前・国籍・OVR・ポジションで検索します。</p>
+  <div class="card" style="margin-bottom:14px"><div class="card-b">
+    <div class="eyebrow">名前（部分一致）</div>
+    <input id="searchQ" type="text" value="${(s.q||'').replace(/"/g,'&quot;')}" placeholder="例: サトウ" style="width:100%;box-sizing:border-box;margin:6px 0 14px;padding:9px 12px;background:rgba(255,255,255,.04);border:1px solid var(--line2);border-radius:8px;color:var(--ink);font-size:14px">
+    <div class="eyebrow">ポジション</div>
+    <div class="seg" style="margin:6px 0 14px">${posBtns}</div>
+    <div class="eyebrow">OVR 下限</div>
+    <div class="seg" style="margin:6px 0 14px">${ovrBtns}</div>
+    <div class="eyebrow">国籍</div>
+    <select data-searchnat style="margin-top:6px">${natOpts}</select>
+  </div></div>
+  <div id="searchResults">${searchResultsInner()}</div>`;
+}
 function renderContracts(){
   const club=G.clubs[G.user];
   const proj=contractProjection(club);
@@ -2878,7 +2933,7 @@ function renderMatch(){
    ACTION BINDING (event delegation on document)
 ============================================================ */
 document.addEventListener("click",e=>{
-  const t=e.target.closest("[data-view],[data-train],[data-style],[data-formation],[data-tempo],[data-press],[data-beater],[data-seeker],[data-sign],[data-release],[data-detail],[data-rankcat],[data-rankpos],[data-rankmetric],[data-loadslot],[data-delslot],[data-delok],[data-tpartner],[data-tgive],[data-tget],[data-tcash],[data-acceptoffer],[data-declineoffer],[data-fxfilter],[data-draft],[data-prophet],#play,#poPlay,#autoLu,#scout,#nextSeason,#toDraft,#closeDetail,#saveFile,#loadBtn,#quickSave,#quickLoad,#continueSave,#openSlots,#slotsClose,#slotsBackdrop,#slotSaveNew,#delCancel,#sendTrade");
+  const t=e.target.closest("[data-view],[data-train],[data-style],[data-formation],[data-tempo],[data-press],[data-beater],[data-seeker],[data-sign],[data-release],[data-detail],[data-rankcat],[data-rankpos],[data-rankmetric],[data-loadslot],[data-delslot],[data-delok],[data-tpartner],[data-tgive],[data-tget],[data-tcash],[data-acceptoffer],[data-declineoffer],[data-fxfilter],[data-draft],[data-prophet],[data-searchpos],[data-searchovr],#play,#poPlay,#autoLu,#scout,#nextSeason,#toDraft,#closeDetail,#saveFile,#loadBtn,#quickSave,#quickLoad,#continueSave,#openSlots,#slotsClose,#slotsBackdrop,#slotSaveNew,#delCancel,#sendTrade");
   if(!t)return;
   if(t.dataset.tpartner){G.trade.partner=+t.dataset.tpartner;G.trade.get=[];render();return;}
   if(t.dataset.tgive){const id=+t.dataset.tgive;G.trade.give=G.trade.give.includes(id)?G.trade.give.filter(x=>x!==id):[...G.trade.give,id];render();return;}
@@ -2911,6 +2966,8 @@ document.addEventListener("click",e=>{
   if(t.id==="toDraft"){startDraft();return;}
   if(t.dataset.draft){draftPick(+t.dataset.draft);return;}
   if(t.dataset.prophet){G.prophetSel=+t.dataset.prophet;G.view="prophet";render();return;}
+  if(t.dataset.searchpos!==undefined){G.search=G.search||{};G.search.pos=t.dataset.searchpos;render();return;}
+  if(t.dataset.searchovr!==undefined){G.search=G.search||{};G.search.minOvr=+t.dataset.searchovr;render();return;}
   if(t.id==="closeDetail"){_detailId=null;render();return;}
   if(t.dataset.view){G.view=t.dataset.view;_detailId=null;render();return;}
   if(t.dataset.train){G.training=t.dataset.train;render();return;}
@@ -2924,9 +2981,15 @@ document.addEventListener("click",e=>{
   if(t.dataset.release){releasePlayer(+t.dataset.release);return;}
   if(t.dataset.detail){_detailId=+t.dataset.detail;render();return;}
 });
+document.addEventListener("input",e=>{
+  const si=e.target.closest("#searchQ");
+  if(si){G.search=G.search||{};G.search.q=si.value;const rc=document.getElementById("searchResults");if(rc)rc.innerHTML=searchResultsInner();}
+});
 document.addEventListener("change",e=>{
   const fi=e.target.closest("#loadInput");
   if(fi){importSaveFile(fi);return;}
+  const sn=e.target.closest("select[data-searchnat]");
+  if(sn){G.search=G.search||{};G.search.nat=sn.value;render();return;}
   const s=e.target.closest("select[data-pos]");
   if(!s)return;
   const pos=s.dataset.pos,slot=+s.dataset.slot,val=s.value?+s.value:null;
