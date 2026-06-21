@@ -1010,7 +1010,9 @@ function ratings(club,lu){
   const atk=(avg(ch,p=>p.att*.5+p.tec*.3+p.spd*.2))*fm.chAtk*s.atk*bt.atk;
   const def=((ke?ke.def:40)*.5 + avg(be,p=>p.def)*.3 + (avg(ch,p=>p.def)*fm.chDef)*.2)*s.def*bt.def*pr.def + avg(be,p=>p.att)*.06;
   const seek=se?(se.spd*.45+se.tec*.25+se.men*.3):40;
-  return {atk,def,seek,se:se,ch,be,ke,
+  // コンディション（怪我明けなどで低下）が出力に影響
+  const fitMul=clamp(0.86+0.14*(avg(P,p=>p.fitness||100)/100),0.72,1.02);
+  return {atk:atk*fitMul,def:def*fitMul,seek:seek*fitMul,se:se,ch,be,ke,
     beat:avg(be,p=>p.att), sta:avg(P,p=>p.sta), tempo:tp, press:pr, beater:bt, role:SEEKROLE[T.seeker]};
 }
 function scoreProb(atk,def){return clamp(0.25+(atk-def)/120,0.05,0.74);}
@@ -1113,8 +1115,14 @@ const TRAIN={attack:["att","tec"],defense:["def","men"],speed:["spd"],technique:
 function applyTraining(club,focus){
   const stats=TRAIN[focus];
   for(const p of club.squad){
-    p.fitness=Math.min(100,p.fitness+ri(8,20));
-    if(p.inj>0){p.inj--;if(p.inj===0&&club.idx===G.user)pushNews("🩹",`${p.name} が負傷から復帰しました。`);continue;}
+    if(p.inj>0){
+      // 怪我からの復帰: 1節ずつ回復、コンディションは徐々に戻る
+      p.inj--;
+      p.fitness=clamp((p.fitness||100)+ri(3,7),0,100);
+      if(p.inj===0){p.fitness=Math.min(p.fitness,68);p.injType=null;if(club.idx===G.user)pushNews("🩹",`${p.name} が負傷から復帰（コンディション ${Math.round(p.fitness)}%）。`);}
+      continue;
+    }
+    p.fitness=Math.min(100,(p.fitness||100)+ri(8,18));
     const ageUp=p.age<=21?0.42:p.age<=25?0.30:p.age<=29?0.16:0;
     for(const s of stats){
       if(overall(p)<p.potential&&rng()<ageUp&&p[s]<99)p[s]=clamp(p[s]+1,25,99);
@@ -1123,24 +1131,49 @@ function applyTraining(club,focus){
     p.value=playerValue(p);
   }
 }
+/* 怪我の種類と程度 */
+const INJ_TYPES=[
+  {name:"打撲",  min:1, max:2, p:0.46},
+  {name:"捻挫",  min:2, max:4, p:0.30},
+  {name:"肉離れ",min:3, max:5, p:0.14},
+  {name:"骨折",  min:6, max:10,p:0.08},
+  {name:"重傷",  min:11,max:16,p:0.02},
+];
+function rollInjury(){let r=rng(),a=0;for(const t of INJ_TYPES){a+=t.p;if(r<a)return{type:t.name,weeks:ri(t.min,t.max)};}return{type:"打撲",weeks:1};}
 function injuryCheck(){
-  // small chance a user starter got knocked during the round
+  // 出場した各スターターが負傷しうる（コンディションが低いほど高リスク）
   const club=G.clubs[G.user];
-  const starters=lineupPlayers(club,G.lineup||bestLineup(club));
-  if(rng()<0.22){
-    const v=pick(starters);if(v){v.inj=ri(1,3);pushNews("🚑",`${v.name} が試合中に負傷、${v.inj}節の離脱見込み。`);}
-  }
+  const starters=lineupPlayers(club,G.lineup||bestLineup(club)).filter(p=>p.inj===0);
+  starters.forEach(p=>{
+    const risk=Math.max(0.012,0.035*(1.4-(p.fitness||100)/100));
+    if(rng()<risk){
+      const inj=rollInjury();
+      p.inj=inj.weeks;p.injType=inj.type;
+      p.fitness=Math.max(25,(p.fitness||100)-ri(18,38));
+      pushNews("🚑",`${p.name} が${inj.type}で離脱（約${inj.weeks}節）。`);
+    }
+  });
 }
 
+/* ロスター上限・自由契約(FA)選手の生成 */
+const ROSTER_MAX=16, ROSTER_MIN=10;
+function rosterCount(club){return club.squad.length;}
+function trimToOVR(p,target){const ks=Object.keys(POS[p.pos].w);let g=60;while(overall(p)>target&&g-->0){const k=pick(ks);p[k]=clamp(p[k]-1,25,99);}}
+function makeFreeAgent(){
+  const pos=pick(POS_ORDER);const r=rng();
+  // FAに大物は出ない: 大半は控え〜ロール級、稀に即戦力どまり
+  const cap = r<0.55?66 : r<0.85?72 : r<0.97?76 : 79;
+  const str = r<0.55?ri(44,58) : r<0.85?ri(54,66) : ri(62,72);
+  let p,tries=0;do{p=makePlayer(pos,str);tries++;}while(overall(p)>cap&&tries<5);
+  if(overall(p)>cap)trimToOVR(p,cap);
+  p.star=false;p.years=ri(1,2);
+  p.value=playerValue(p);p.salary=contractSalary(p);
+  return p;
+}
 function refreshMarket(initial){
   G.market=[];
   const n=ri(6,8);
-  for(let i=0;i<n;i++){
-    const pos=pick(POS_ORDER);
-    const str=ri(48,82);
-    const p=makePlayer(pos,str);
-    G.market.push(p);
-  }
+  for(let i=0;i<n;i++)G.market.push(makeFreeAgent());
 }
 
 /* ============================================================
@@ -1194,6 +1227,7 @@ function finalizeRound(){
     accumulateStats(q.ev,hl,al,G.clubs[h],G.clubs[a]);
     G.results[G.round].push({h,a,hs:q.hs,as:q.as});
   }
+  generateProphet();
   applyTraining(G.clubs[G.user],G.training);
   injuryCheck();
   // AI clubs light training
@@ -1215,15 +1249,48 @@ function endSeason(){
   pushNews("👑",`シーズン${G.seasonNo}終了。優勝は ${champ.name}。あなたの順位は ${myPos}位 でした。`);
   G.view="seasonend";render();
 }
+/* オフシーズンの成長・衰え（年齢に応じた選手のOVR変動） */
+function offseasonDevelop(club){
+  const notes=[];
+  club.squad.forEach(p=>{
+    const before=overall(p);const ks=Object.keys(POS[p.pos].w);
+    let delta = p.age<=21?ri(2,5) : p.age<=24?ri(0,4) : p.age<=27?ri(-1,2) : p.age<=30?ri(-3,1) : ri(-5,-1);
+    const up=delta>0;
+    for(let i=0;i<Math.abs(delta);i++){const k=pick(ks);
+      if(up){if(overall(p)<p.potential)p[k]=clamp(p[k]+1,25,99);}
+      else p[k]=clamp(p[k]-1,25,99);
+    }
+    if(p.age<=20&&rng()<0.35)p.potential=clamp(p.potential+ri(1,3),overall(p),99);
+    p.value=playerValue(p);
+    const after=overall(p);
+    if(club.idx===G.user&&after!==before)notes.push({p,before,after,d:after-before});
+  });
+  return notes;
+}
+function trimRoster(club){
+  while(club.squad.length>ROSTER_MAX){
+    const cand=club.squad.filter(p=>club.squad.filter(x=>x.pos===p.pos).length>POS[p.pos].count);
+    if(!cand.length)break;
+    cand.sort((a,b)=>overall(a)-overall(b));
+    const drop=cand[0];club.squad=club.squad.filter(p=>p.id!==drop.id);
+  }
+}
 function newSeason(){
-  G.seasonNo++;G.round=0;G.results=[];G.phase="regular";G.po=null;
-  let renewals=0;
-  G.clubs.forEach(c=>{c.P=c.W=c.D=c.L=c.PF=c.PA=0;c.squad.forEach(p=>{
-    p.age++;p.value=playerValue(p);p.season={gp:0,goals:0,catches:0};
-    p.years=(p.years||1)-1;
-    if(p.years<=0){p.years=ri(1,3);p.salary=contractSalary(p);if(c.idx===G.user)renewals++;}
-  });});
-  if(renewals>0)pushNews("📝",`${renewals}名の選手と契約を更新しました（複数年契約・サラリー再算定）。`);
+  G.seasonNo++;G.round=0;G.results=[];G.phase="regular";G.po=null;G.awards=null;
+  let renewals=0;const myNotes=[];
+  G.clubs.forEach(c=>{
+    c.P=c.W=c.D=c.L=c.PF=c.PA=0;
+    c.squad.forEach(p=>{p.age++;p.season={gp:0,goals:0,catches:0};p.fitness=Math.min(100,(p.fitness||100)+20);p.inj=0;p.injType=null;});
+    const notes=offseasonDevelop(c);if(c.idx===G.user)myNotes.push(...notes);
+    c.squad.forEach(p=>{p.years=(p.years||1)-1;if(p.years<=0){p.years=ri(1,3);p.salary=contractSalary(p);if(c.idx===G.user)renewals++;}});
+    if(c.idx!==G.user)trimRoster(c);
+  });
+  if(myNotes.length){
+    const rise=myNotes.slice().sort((a,b)=>b.d-a.d)[0], fall=myNotes.slice().sort((a,b)=>a.d-b.d)[0];
+    if(rise&&rise.d>0)pushNews('📈',`${rise.p.name} が成長（OVR ${rise.before}→${rise.after}）。`);
+    if(fall&&fall.d<0)pushNews('📉',`${fall.p.name} に衰えの兆し（OVR ${fall.before}→${fall.after}）。`);
+  }
+  if(renewals>0)pushNews("📝",`${renewals}名と契約更新（複数年・サラリー再算定）。`);
   G.schedule=makeSchedule(TEAMS.length);
   refreshMarket(true);
   autoLineup(G.clubs[G.user]);
@@ -1244,11 +1311,27 @@ function seedRank(idx){return G.po.seeds.indexOf(idx);}
 function seedPair(x,y){return seedRank(x)<=seedRank(y)?[x,y]:[y,x];}
 function decisiveQuick(h,a){let r,n=0;do{r=quickSim(G.clubs[h],G.clubs[a]);n++;}while(r.hs===r.as&&n<25);if(r.hs===r.as)r.hs+=10;return r;}
 function buildStage(stage,pairs){G.po.stage=stage;G.po.ties=pairs.map(([a,b])=>({a,b,wa:0,wb:0,games:[],winner:null}));}
+/* 決勝の選手スタッツ（ファイナルMVP用） */
+function accFinals(ev,homeClub,awayClub,homeLu,awayLu){
+  if(!G.po.finalStats)G.po.finalStats={};
+  const fs=G.po.finalStats;
+  const bump=(p,f)=>{if(!p)return;const o=fs[p.id]||(fs[p.id]={goals:0,catches:0,gp:0});o[f]++;};
+  lineupPlayers(homeClub,homeLu).forEach(p=>bump(p,'gp'));
+  lineupPlayers(awayClub,awayLu).forEach(p=>bump(p,'gp'));
+  const find=id=>id==null?null:(getP(homeClub,id)||getP(awayClub,id));
+  ev.forEach(e=>{if(e.type==="goal"&&e.sid!=null)bump(find(e.sid),'goals');if(e.type==="catch"&&e.cid!=null)bump(find(e.cid),'catches');});
+}
 function autoCompleteTie(t){
-  let g=t.games.length;
+  let g=t.games.length;const isF=(G.po.stage==='F');
   while(t.wa<2&&t.wb<2){
     const aHome=(g%2===0);const home=aHome?t.a:t.b,away=aHome?t.b:t.a;
-    const r=decisiveQuick(home,away);
+    let r;
+    if(isF){
+      const hl=bestLineup(G.clubs[home]),al=bestLineup(G.clubs[away]);let n=0;
+      do{r=simulateMatch(G.clubs[home],G.clubs[away],hl,al);n++;}while(r.hs===r.as&&n<25);
+      if(r.hs===r.as)r.hs+=10;
+      accFinals(r.ev,G.clubs[home],G.clubs[away],hl,al);
+    } else r=decisiveQuick(home,away);
     const aS=aHome?r.hs:r.as,bS=aHome?r.as:r.hs;
     t.games.push({home,away,hs:r.hs,as:r.as});
     if(aS>bS)t.wa++;else t.wb++;g++;
@@ -1257,7 +1340,7 @@ function autoCompleteTie(t){
 }
 function enterPlayoffs(){
   const t=standings();const seeds=t.slice(0,8).map(c=>c.idx);
-  G.po={seeds,stage:'QF',ties:[],results:{QF:[],SF:[],F:[]},championIdx:null,userSeries:null};
+  G.po={seeds,stage:'QF',ties:[],results:{QF:[],SF:[],F:[]},championIdx:null,userSeries:null,finalStats:{}};
   buildStage('QF',[[seeds[0],seeds[7]],[seeds[3],seeds[4]],[seeds[1],seeds[6]],[seeds[2],seeds[5]]]);
   G.phase='playoff';G.match=null;
   const inPo=seeds.includes(G.user);
@@ -1302,6 +1385,7 @@ function finalizePlayoffGame(){
   s.games.push({home:m.home,away:m.away,hs:m.hs,as:m.as});
   if(aS>bS)s.wa++;else s.wb++;
   const gameNo=s.games.length;
+  if(G.po.stage==='F'){const hc=G.clubs[m.home],ac=G.clubs[m.away];const hl=(m.home===G.user)?G.lineup:bestLineup(hc);const al=(m.away===G.user)?G.lineup:bestLineup(ac);accFinals(m.ev,hc,ac,hl,al);}
   pushNews('🃏',`PO ${stageName(G.po.stage)} 第${gameNo}戦: ${G.clubs[m.home].name} ${m.hs}-${m.as} ${G.clubs[m.away].name}`);
   if(s.wa>=2||s.wb>=2){
     s.winner=s.wa>s.wb?s.a:s.b;
@@ -1316,6 +1400,13 @@ function finalizePlayoffGame(){
 }
 function endPlayoffs(){
   pushNews('👑',`プレーオフ優勝は ${G.clubs[G.po.championIdx].name}！`);
+  G.awards=computeAwards();
+  if(G.awards){
+    G.awardHistory=G.awardHistory||[];G.awardHistory.push(G.awards);
+    const a=G.awards;
+    if(a.mvp)pushNews('🏅',`シーズンMVPは ${a.mvp.name}（${G.clubs[a.mvp.club].name}）。`);
+    if(a.finalsMvp)pushNews('🏆',`ファイナルMVPは ${a.finalsMvp.name}。`);
+  }
   G.phase='seasonend';G.view='seasonend';
 }
 
@@ -1325,6 +1416,7 @@ function endPlayoffs(){
 function signPlayer(id){
   const i=G.market.findIndex(p=>p.id===id);if(i<0)return;
   const p=G.market[i];
+  if(rosterCount(G.clubs[G.user])>=ROSTER_MAX){flash(`ロスター上限（${ROSTER_MAX}名）に達しています。先に選手を放出してください。`);return;}
   if(p.value>G.budget){flash("予算が不足しています。");return;}
   if(capSpace(G.clubs[G.user])<(p.salary||0)){flash(`サラリーキャップを超過します（残り枠 ${gold(capSpace(G.clubs[G.user]))}）。`);return;}
   G.budget-=p.value;
@@ -1496,6 +1588,7 @@ function reindexAfterLoad(){
   const visit=p=>{if(p&&p.id){maxId=Math.max(maxId,p.id);usedNames.add(p.name);}};
   (G.clubs||[]).forEach(c=>(c.squad||[]).forEach(visit));
   (G.market||[]).forEach(visit);
+  (G.draft&&G.draft.pool||[]).forEach(visit);
   _pid=maxId+1;
 }
 function loadFromString(str){
@@ -1612,6 +1705,10 @@ function render(){
     case "table":body=renderTable();break;
     case "fixtures":body=renderFixtures();break;
     case "rankings":body=renderRankings();break;
+    case "contracts":body=renderContracts();break;
+    case "prophet":body=renderProphet();break;
+    case "awards":body=renderAwards();break;
+    case "draft":body=renderDraft();break;
     case "playoff":body=renderPlayoffHub();break;
     default:body=renderDashboard();
   }
@@ -1623,8 +1720,9 @@ function renderShell(body){
   const club=G.clubs[G.user];
   const table=standings();
   const myPos=table.findIndex(c=>c.idx===G.user)+1;
-  const navItems=[["dashboard","ダッシュボード"],["squad","スカッド"],["tactics","戦術"],["transfers","移籍市場"],["trade","トレード"],["table","順位表"],["rankings","ランキング"],["fixtures","日程"]];
-  if(G.phase!=="regular")navItems.push(["playoff","プレーオフ"]);
+  const navItems=[["dashboard","ダッシュボード"],["squad","スカッド"],["tactics","戦術"],["transfers","移籍市場"],["trade","トレード"],["contracts","契約"],["table","順位表"],["rankings","ランキング"],["awards","アワード"],["prophet","新聞"],["fixtures","日程"]];
+  if(G.phase==="draft")navItems.push(["draft","ドラフト"]);
+  else if(G.phase!=="regular")navItems.push(["playoff","プレーオフ"]);
   app().innerHTML=`
   <div class="topbar"><div class="topbar-in">
     <div class="crest">${crestSVG(G.user,42)}</div>
@@ -2167,11 +2265,229 @@ function renderSeasonEnd(){
       <div style="font-size:13px;color:var(--muted2);letter-spacing:.06em">あなたの成績</div>
       <div style="font-size:20px;font-weight:800;margin:4px 0;color:${isChamp?'var(--gold)':'var(--ink)'}">${result}</div>
       <p class="tiny muted">レギュラーシーズン ${leaguePos} 位 ・ ${sub}</p>
+      ${G.awards&&G.awards.mvp?`<div class="divider"></div>
+      <div style="font-size:13px;color:var(--muted2);letter-spacing:.06em">年間表彰</div>
+      <div class="tiny" style="margin-top:6px;line-height:1.8">
+        🏅 MVP: <b>${G.awards.mvp.name}</b>（${G.clubs[G.awards.mvp.club].name}）<br>
+        ${G.awards.finalsMvp?`🏆 ファイナルMVP: <b>${G.awards.finalsMvp.name}</b><br>`:''}
+        ⚡ 最優秀OF: ${G.awards.offense?G.awards.offense.name:'-'} ・ 🛡 最優秀DF: ${G.awards.defense?G.awards.defense.name:'-'}
+      </div>`:''}
       <div class="btn-row" style="justify-content:center;margin-top:20px">
-        <button class="btn" data-view="playoff">ブラケットを見る</button>
-        <button class="btn gold" id="nextSeason">次のシーズンへ ▶</button>
+        <button class="btn" data-view="awards">アワード詳細</button>
+        <button class="btn" data-view="playoff">ブラケット</button>
+        <button class="btn gold" id="toDraft">新人ドラフトへ ▶</button>
       </div>
     </div>
+  </div>`;
+}
+
+/* ============================================================
+   AWARDS · CONTRACTS · DAILY PROPHET · DRAFT  (added systems)
+============================================================ */
+function allPlayers(){const a=[];G.clubs.forEach(c=>c.squad.forEach(p=>a.push({p,club:c})));return a;}
+function findPlayerById(id){for(const c of G.clubs){const p=getP(c,id);if(p)return p;}return null;}
+
+/* ---- 契約・サラリーキャップ予測 ---- */
+function contractProjection(club){
+  const yrs=[0,0,0,0];
+  club.squad.forEach(p=>{const y=p.years||1;for(let o=0;o<4;o++){if(o<y)yrs[o]+=(p.salary||0);}});
+  return yrs;
+}
+function renderContracts(){
+  const club=G.clubs[G.user];
+  const proj=contractProjection(club);
+  const rows=club.squad.slice().sort((a,b)=>(b.salary||0)-(a.salary||0)).map(p=>{
+    const y=p.years||1;
+    const cell=o=>o<y?`<td class="num">${gold(p.salary||0)}</td>`:`<td class="num muted">—</td>`;
+    return `<tr>
+      <td><span class="ovr ${ovrTier(overall(p))}">${overall(p)}</span></td>
+      <td><div class="player-name">${p.name} ${p.star?'<span class="gold">★</span>':''}</div><div class="tiny muted">${POS[p.pos].short}・${p.age}歳${p.inj>0?` ・ <span class="quaffle">負傷${p.inj}節</span>`:''}</div></td>
+      <td class="num gold">${gold(p.salary||0)}</td>
+      <td class="center">${y}年${y===1?' <span class="pill loss">満了</span>':''}</td>
+      ${[0,1,2,3].map(cell).join("")}
+    </tr>`;
+  }).join("");
+  const cap=SALARY_CAP;
+  const totalRow=`<tr style="border-top:2px solid var(--line2);font-weight:800">
+    <td colspan="4" class="num">確定サラリー合計</td>
+    ${proj.map(v=>`<td class="num ${v>cap?'quaffle':'gold'}">${gold(v)}</td>`).join("")}</tr>
+  <tr><td colspan="4" class="num tiny muted">キャップ残り枠</td>
+    ${proj.map(v=>`<td class="num tiny ${cap-v<0?'quaffle':'aqua'}">${gold(cap-v)}</td>`).join("")}</tr>`;
+  return `<p class="eyebrow">契約状況・サラリーキャップ</p>
+  <p class="tiny muted" style="margin-top:-4px">各シーズンに確定しているサラリー（満了選手は以降「—」＝再契約で別途発生）。キャップ ${gold(cap)} ／ ロスター <b>${club.squad.length}/${ROSTER_MAX}</b> 名。</p>
+  <div class="card"><div class="card-b" style="padding:0;overflow-x:auto"><table>
+    <thead><tr><th>OVR</th><th>選手</th><th class="num">年俸</th><th class="center">残契約</th><th class="num">現在</th><th class="num">+1</th><th class="num">+2</th><th class="num">+3</th></tr></thead>
+    <tbody>${rows}${totalRow}</tbody></table></div></div>
+  <div class="card" style="margin-top:14px"><div class="card-b">${capBar(club)}</div></div>`;
+}
+
+/* ---- 年間アワード ---- */
+function prodOff(p){return overall(p)+(p.season?p.season.goals*0.6+p.season.catches*7:0);}
+function prodDef(p){return overall(p)+(p.season?p.season.gp*0.4:0);}
+function mvpScore(p,rb){return overall(p)+(p.season?p.season.goals*0.5+p.season.catches*6:0)+(rb||0);}
+function bestBy(pool,score,n){return pool.slice().sort((x,y)=>score(y.p)-score(x.p)).slice(0,n);}
+function computeFinalsMvp(champIdx){
+  const champ=G.clubs[champIdx];if(!champ)return null;
+  const fs=(G.po&&G.po.finalStats)||{};
+  let best=null,bestScore=-1;
+  champ.squad.forEach(p=>{const s=fs[p.id];const sc=(s?(s.goals*0.6+s.catches*8+s.gp*0.5):0)+overall(p)*0.1;if(sc>bestScore){bestScore=sc;best=p;}});
+  if(!best)return null;const s=fs[best.id]||{goals:0,catches:0,gp:0};
+  return {id:best.id,name:best.name,pos:best.pos,ovr:overall(best),club:champIdx,nat:best.nat,goals:s.goals,catches:s.catches};
+}
+function computeAwards(){
+  const tbl=standings();const rankOf={};tbl.forEach((c,i)=>rankOf[c.idx]=i);
+  const pool=allPlayers().filter(x=>x.p.season&&x.p.season.gp>0);
+  if(!pool.length)return null;
+  const rb=x=>Math.max(0,(G.clubs.length-rankOf[x.club.idx])*0.8);
+  const lite=x=>x?{id:x.p.id,name:x.p.name,pos:x.p.pos,ovr:overall(x.p),club:x.club.idx,nat:x.p.nat,goals:x.p.season.goals,catches:x.p.season.catches,gp:x.p.season.gp}:null;
+  const mvp=pool.slice().sort((a,b)=>mvpScore(b.p,rb(b))-mvpScore(a.p,rb(a)))[0];
+  const byPos=pos=>pool.filter(x=>x.p.pos===pos);
+  const firstTeam={CH:bestBy(byPos("CH"),prodOff,3).map(lite),BE:bestBy(byPos("BE"),prodDef,2).map(lite),KE:bestBy(byPos("KE"),prodDef,1).map(lite),SE:bestBy(byPos("SE"),prodOff,1).map(lite)};
+  const offense=pool.filter(x=>x.p.pos==="CH"||x.p.pos==="SE").sort((a,b)=>prodOff(b.p)-prodOff(a.p))[0];
+  const defense=pool.filter(x=>x.p.pos==="KE"||x.p.pos==="BE").sort((a,b)=>prodDef(b.p)-prodDef(a.p))[0];
+  const champIdx=(G.po&&G.po.championIdx!=null)?G.po.championIdx:tbl[0].idx;
+  return {seasonNo:G.seasonNo,champIdx,mvp:lite(mvp),offense:lite(offense),defense:lite(defense),finalsMvp:computeFinalsMvp(champIdx),firstTeam};
+}
+function awChip(x){
+  if(!x)return '<span class="tiny muted">該当なし</span>';
+  return `<div style="display:flex;align-items:center;gap:9px"><span class="ovr ${ovrTier(x.ovr)}">${x.ovr}</span>
+    <div><div class="player-name">${flag(x.nat)} ${x.name}</div>
+    <div class="tiny muted">${POS[x.pos].name} ・ ${G.clubs[x.club]?G.clubs[x.club].name:''}${x.goals!=null&&(x.pos==='CH'||x.pos==='SE')?` ・ ${x.goals}G`:''}${x.catches?` ・ 捕獲${x.catches}`:''}</div></div></div>`;
+}
+function renderAwardsFor(aw,history){
+  const ft=aw.firstTeam||{};
+  const big=(t,x,ic)=>`<div class="card"><div class="card-h"><h3>${ic} ${t}</h3></div><div class="card-b">${awChip(x)}</div></div>`;
+  const ftList=[...(ft.CH||[]),...(ft.BE||[]),...(ft.KE||[]),...(ft.SE||[])].map(x=>`<tr><td class="center"><span class="pos ${x.pos}">${POS[x.pos].short}</span></td><td>${awChip(x)}</td></tr>`).join("");
+  const histRows=(history||[]).slice().reverse().slice(0,12).map(h=>`<tr><td class="center">S${h.seasonNo}</td><td>${G.clubs[h.champIdx]?G.clubs[h.champIdx].name:'-'}</td><td>${h.mvp?h.mvp.name:'-'}</td><td>${h.finalsMvp?h.finalsMvp.name:'-'}</td></tr>`).join("");
+  return `<p class="eyebrow">年間アワード ・ シーズン${aw.seasonNo}</p>
+  <div class="grid cols-2">
+    ${big('シーズンMVP',aw.mvp,'🏅')}
+    ${big('ファイナルMVP',aw.finalsMvp,'🏆')}
+    ${big('最優秀オフェンス賞',aw.offense,'⚡')}
+    ${big('最優秀ディフェンス賞',aw.defense,'🛡')}
+  </div>
+  <div class="card" style="margin-top:16px"><div class="card-h"><h3>⭐ オールリーグ・ファーストチーム</h3><span class="tiny muted">CH×3 ・ BE×2 ・ KE ・ SE</span></div>
+    <div class="card-b" style="padding:0"><table><tbody>${ftList||'<tr><td class="muted center" style="padding:20px">該当なし</td></tr>'}</tbody></table></div></div>
+  ${histRows?`<div class="card" style="margin-top:16px"><div class="card-h"><h3>歴代受賞</h3></div><div class="card-b" style="padding:0"><table><thead><tr><th class="center">季</th><th>優勝</th><th>MVP</th><th>ファイナルMVP</th></tr></thead><tbody>${histRows}</tbody></table></div></div>`:''}`;
+}
+function renderAwards(){
+  const aw=G.awards||((G.awardHistory&&G.awardHistory.length)?G.awardHistory[G.awardHistory.length-1]:null);
+  if(!aw)return `<p class="eyebrow">年間アワード</p><div class="card"><div class="card-b center muted" style="padding:28px">シーズン終了時にMVP・ファイナルMVP・オフェンス／ディフェンス最優秀・ファーストチームが発表されます。</div></div>`;
+  return renderAwardsFor(aw,G.awardHistory||[]);
+}
+
+/* ---- 日刊預言者新聞・クィディッチ欄 ---- */
+function generateProphet(){
+  const wk=G.round+1;const res=G.results[G.round]||[];
+  const tbl=standings();const leader=tbl[0];
+  let big=null;res.forEach(m=>{const d=Math.abs(m.hs-m.as);if(!big||d>big.d)big=Object.assign({},m,{d});});
+  const pool=allPlayers().filter(x=>x.p.season&&x.p.season.gp>0);
+  const topG=pool.slice().sort((a,b)=>b.p.season.goals-a.p.season.goals)[0];
+  const items=[];
+  if(big){const hn=G.clubs[big.h].name,an=G.clubs[big.a].name;const wn=big.hs>big.as?hn:an;items.push(`${wn} が ${Math.max(big.hs,big.as)}–${Math.min(big.hs,big.as)} で快勝。観客を沸かせた。`);}
+  items.push(`首位は ${leader.name}（勝点${leader.P}）。${tbl[1]?`2位 ${tbl[1].name} が勝点${Math.max(0,leader.P-tbl[1].P)}差で追走。`:''}`);
+  if(topG&&topG.p.season.goals>0)items.push(`得点ランクは ${topG.p.name}（${topG.club.name}）が ${topG.p.season.goals} ゴールで先頭。`);
+  const inj=G.clubs[G.user].squad.find(p=>p.inj>0);
+  if(inj)items.push(`負傷情報: あなたのクラブの ${inj.name} は${inj.injType?inj.injType+'で':''}あと ${inj.inj} 節の離脱見込み。`);
+  else items.push(pick(["移籍市場では各クラブが補強に動くとの噂。","ファンは週末の好カードに期待を寄せている。","解説者は上位陣の戦術的成熟を高く評価した。"]));
+  const headline=pick([`第${wk}節 詳報`,`クィディッチ・ウィークリー 第${wk}節`,`今節のハイライト`,`スタンドの熱狂 ── 第${wk}節`]);
+  G.prophet=G.prophet||[];
+  G.prophet.unshift({wk,season:G.seasonNo,headline,items});
+  if(G.prophet.length>40)G.prophet.pop();
+}
+function renderProphet(){
+  const issues=G.prophet||[];
+  if(!issues.length)return `<p class="eyebrow">日刊預言者新聞 ・ クィディッチ欄</p><div class="card"><div class="card-b center muted" style="padding:28px">まだ記事がありません。試合（節）を進めると毎週の論評が掲載されます。</div></div>`;
+  const L=issues[0];
+  const masthead=`<div class="card" style="border-color:var(--gold-soft);background:linear-gradient(180deg,rgba(230,185,79,.06),transparent)"><div class="card-b">
+    <div style="text-align:center;border-bottom:2px solid var(--line2);padding-bottom:8px;margin-bottom:10px">
+      <div class="cz" style="font-size:23px;letter-spacing:.05em">日刊預言者新聞</div>
+      <div class="tiny muted">クィディッチ欄 ・ シーズン${L.season} 第${L.wk}節</div>
+    </div>
+    <h3 style="margin:0 0 8px">${L.headline}</h3>
+    ${L.items.map(it=>`<p style="margin:7px 0;line-height:1.75">▪ ${it}</p>`).join("")}
+  </div></div>`;
+  const past=issues.slice(1,8).map(is=>`<div class="card" style="margin-top:12px"><div class="card-h"><h3>S${is.season} 第${is.wk}節 ・ ${is.headline}</h3></div><div class="card-b">${is.items.map(it=>`<p class="tiny" style="margin:4px 0;line-height:1.6">▪ ${it}</p>`).join("")}</div></div>`).join("");
+  return `<p class="eyebrow">日刊預言者新聞 ・ クィディッチ欄</p>${masthead}${past}`;
+}
+
+/* ---- 新人ドラフト ---- */
+const DRAFT_ROUNDS=2;
+function makeProspect(){
+  const pos=pick(POS_ORDER);
+  const p=makePlayer(pos,ri(50,64));
+  p.age=ri(17,20);
+  trimToOVR(p,ri(58,70));
+  const o=overall(p);
+  p.potential=clamp(o+ri(8,22),o+6,99);
+  p.star=false;p.years=3;
+  p.value=playerValue(p);p.salary=Math.round(contractSalary(p)*0.7/100)*100;
+  return p;
+}
+function startDraft(){
+  const order=standings().map(c=>c.idx).reverse(); // 最下位から
+  const seq=[];
+  for(let r=0;r<DRAFT_ROUNDS;r++){const ord=(r%2===0)?order:order.slice().reverse();ord.forEach(i=>seq.push(i));} // スネーク
+  const pool=[];const n=seq.length+6;for(let i=0;i<n;i++)pool.push(makeProspect());
+  pool.sort((a,b)=>b.potential-a.potential);
+  G.draft={order:seq,pick:0,pool,log:[],rounds:DRAFT_ROUNDS};
+  G.phase='draft';G.view='draft';
+  pushNews('🎓',`新人ドラフト開催（全${DRAFT_ROUNDS}巡 ・ ${seq.length}指名）。指名順は下位クラブ優先。`);
+  advanceDraft();
+}
+function draftRoundNo(){return Math.floor(G.draft.pick/G.clubs.length)+1;}
+function teamNeedScore(club,p){const cnt=club.squad.filter(x=>x.pos===p.pos).length;const need=Math.max(0,(POS[p.pos].count+1)-cnt);return p.potential+need*4;}
+function advanceDraft(){
+  const d=G.draft;
+  while(d.pick<d.order.length){
+    const idx=d.order[d.pick];
+    if(idx===G.user){render();return;}
+    let best=0,bs=-1;d.pool.forEach((p,i)=>{const s=teamNeedScore(G.clubs[idx],p);if(s>bs){bs=s;best=i;}});
+    const p=d.pool.splice(best,1)[0];const rnd=draftRoundNo();
+    G.clubs[idx].squad.push(p);d.log.push({club:idx,id:p.id,round:rnd});
+    d.pick++;
+  }
+  finishDraft();
+}
+function draftPick(id){
+  const d=G.draft;if(!d)return;
+  if(d.order[d.pick]!==G.user)return;
+  const i=d.pool.findIndex(p=>p.id===id);if(i<0)return;
+  const p=d.pool.splice(i,1)[0];const rnd=draftRoundNo();
+  G.clubs[G.user].squad.push(p);d.log.push({club:G.user,id:p.id,round:rnd});
+  pushNews('🎓',`ドラフト${rnd}巡: ${p.name}（${POS[p.pos].short}・OVR${overall(p)}／POT${p.potential}）を指名。`);
+  d.pick++;advanceDraft();
+}
+function finishDraft(){
+  const d=G.draft;G.draft=null;
+  if(d)pushNews('✅',`ドラフト終了。${d.log.length}名の新人が各クラブに加入。`);
+  newSeason();
+}
+function renderDraft(){
+  const d=G.draft;
+  if(!d)return '<div class="card"><div class="card-b center muted" style="padding:28px">ドラフトは終了しました。</div></div>';
+  const onClock=d.order[d.pick];
+  const yourTurn=(onClock===G.user)&&d.pick<d.order.length;
+  const upcoming=d.order.slice(d.pick,d.pick+8).map((idx,i)=>`<span class="pill ${idx===G.user?'win':''}" style="margin:2px 3px">${i===0?'▶ ':''}${G.clubs[idx].name}</span>`).join(' ');
+  const pool=d.pool.slice().sort((a,b)=>b.potential-a.potential);
+  const rows=pool.map(p=>`<tr>
+    <td><span class="ovr ${ovrTier(overall(p))}">${overall(p)}</span></td>
+    <td><div style="display:flex;align-items:center;gap:8px"><span class="ava">${avatarSVG(p,32,null)}</span><div><div class="player-name">${p.name}</div><div class="tiny muted">${POS[p.pos].name} ・ ${flag(p.nat)} ${p.nat} ・ ${p.age}歳</div></div></div></td>
+    <td class="center"><span class="pos ${p.pos}">${POS[p.pos].short}</span></td>
+    <td class="center gold">${p.potential}</td>
+    <td class="num">${yourTurn?`<button class="btn sm gold" data-draft="${p.id}">指名</button>`:''}</td>
+  </tr>`).join("");
+  const log=d.log.slice(-14).reverse().map(l=>{const p=findPlayerById(l.id);return `<div class="tiny" style="padding:3px 0;border-bottom:1px solid var(--line)">${l.round}巡 ・ <b>${G.clubs[l.club].name}</b> ← ${p?p.name:'?'}（${p?POS[p.pos].short:''}${p?'/OVR'+overall(p):''}）</div>`;}).join("");
+  return `<p class="eyebrow">新人ドラフト ・ シーズン${G.seasonNo}終了後（全${d.rounds}巡 ・ スネーク方式）</p>
+  <div class="card" style="margin-bottom:14px;border-color:${yourTurn?'var(--gold)':'var(--line2)'}"><div class="card-b">
+    <div class="eyebrow">指名 ${Math.min(d.pick+1,d.order.length)} / ${d.order.length}（${draftRoundNo()}巡目）</div>
+    <div style="margin:8px 0">${upcoming||'<span class="tiny muted">—</span>'}</div>
+    ${yourTurn?`<div class="gold" style="font-weight:800">⏰ あなたの指名です。下のリストから選択してください。</div>`:`<div class="muted">${onClock!=null?G.clubs[onClock].name+' が選択中…':'ドラフト終了'}</div>`}
+  </div></div>
+  <div class="grid cols-2">
+    <div class="card"><div class="card-h"><h3>指名可能なプロスペクト</h3><span class="tiny muted">${pool.length}名</span></div>
+      <div class="card-b" style="padding:0"><table><thead><tr><th>OVR</th><th>選手</th><th class="center">位置</th><th class="center">POT</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>
+    <div class="card"><div class="card-h"><h3>指名履歴</h3></div><div class="card-b">${log||'<span class="tiny muted">まだありません</span>'}</div></div>
   </div>`;
 }
 
@@ -2246,7 +2562,7 @@ function renderMatch(){
    ACTION BINDING (event delegation on document)
 ============================================================ */
 document.addEventListener("click",e=>{
-  const t=e.target.closest("[data-view],[data-train],[data-style],[data-formation],[data-tempo],[data-press],[data-beater],[data-seeker],[data-sign],[data-release],[data-detail],[data-rankcat],[data-rankpos],[data-rankmetric],[data-loadslot],[data-delslot],[data-delok],[data-tpartner],[data-tgive],[data-tget],[data-tcash],[data-acceptoffer],[data-declineoffer],[data-fxfilter],#play,#poPlay,#autoLu,#scout,#nextSeason,#closeDetail,#saveFile,#loadBtn,#quickSave,#quickLoad,#continueSave,#openSlots,#slotsClose,#slotsBackdrop,#slotSaveNew,#delCancel,#sendTrade");
+  const t=e.target.closest("[data-view],[data-train],[data-style],[data-formation],[data-tempo],[data-press],[data-beater],[data-seeker],[data-sign],[data-release],[data-detail],[data-rankcat],[data-rankpos],[data-rankmetric],[data-loadslot],[data-delslot],[data-delok],[data-tpartner],[data-tgive],[data-tget],[data-tcash],[data-acceptoffer],[data-declineoffer],[data-fxfilter],[data-draft],#play,#poPlay,#autoLu,#scout,#nextSeason,#toDraft,#closeDetail,#saveFile,#loadBtn,#quickSave,#quickLoad,#continueSave,#openSlots,#slotsClose,#slotsBackdrop,#slotSaveNew,#delCancel,#sendTrade");
   if(!t)return;
   if(t.dataset.tpartner){G.trade.partner=+t.dataset.tpartner;G.trade.get=[];render();return;}
   if(t.dataset.tgive){const id=+t.dataset.tgive;G.trade.give=G.trade.give.includes(id)?G.trade.give.filter(x=>x!==id):[...G.trade.give,id];render();return;}
@@ -2276,6 +2592,8 @@ document.addEventListener("click",e=>{
   if(t.id==="autoLu"){autoLineup(G.clubs[G.user]);render();return;}
   if(t.id==="scout"){scoutMore();return;}
   if(t.id==="nextSeason"){newSeason();return;}
+  if(t.id==="toDraft"){startDraft();return;}
+  if(t.dataset.draft){draftPick(+t.dataset.draft);return;}
   if(t.id==="closeDetail"){_detailId=null;render();return;}
   if(t.dataset.view){G.view=t.dataset.view;_detailId=null;render();return;}
   if(t.dataset.train){G.training=t.dataset.train;render();return;}
