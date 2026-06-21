@@ -1722,7 +1722,7 @@ function renderShell(body){
   const club=G.clubs[G.user];
   const table=standings();
   const myPos=table.findIndex(c=>c.idx===G.user)+1;
-  const navItems=[["dashboard","ダッシュボード"],["squad","スカッド"],["tactics","戦術"],["transfers","移籍市場"],["trade","トレード"],["contracts","契約"],["table","順位表"],["rankings","ランキング"],["awards","アワード"],["prophet","新聞"],["fixtures","日程"]];
+  const navItems=[["dashboard","ダッシュボード"],["prophet","新聞"],["squad","スカッド"],["tactics","戦術"],["transfers","移籍市場"],["trade","トレード"],["contracts","契約"],["table","順位表"],["rankings","ランキング"],["awards","アワード"],["fixtures","日程"]];
   if(G.phase==="draft")navItems.push(["draft","ドラフト"]);
   else if(G.phase!=="regular")navItems.push(["playoff","プレーオフ"]);
   app().innerHTML=`
@@ -2624,6 +2624,54 @@ function renderDraft(){
   </div>`;
 }
 
+/* 試合後の結果を「予言者新聞 号外」風に報じる */
+function matchReportPaper(m){
+  const home=G.clubs[m.home], away=G.clubs[m.away];
+  const hw=m.hs>m.as, draw=m.hs===m.as;
+  const wn=draw?null:(hw?home:away), ln=draw?null:(hw?away:home);
+  const margin=Math.abs(m.hs-m.as);
+  const userWon=(m.isHome&&m.hs>m.as)||(!m.isHome&&m.as>m.hs);
+  const hadCatch=m.ev.some(e=>e.type==='catch');
+  // 得点者・捕獲者を集計
+  const goals={};let catcher=null;
+  m.ev.forEach(e=>{
+    if(e.type==='goal'&&e.sid!=null){const ph=getP(home,e.sid);const o=goals[e.sid]||(goals[e.sid]={p:ph||getP(away,e.sid),club:ph?home:away,g:0});o.g++;}
+    if(e.type==='catch'&&e.cid!=null){const ph=getP(home,e.cid);catcher={p:ph||getP(away,e.cid),club:ph?home:away};}
+  });
+  const scorers=Object.values(goals).filter(x=>x.p).sort((a,b)=>b.g-a.g).slice(0,6);
+  const kind=m.kind==='playoff'?`プレーオフ ${G.po?stageName(G.po.stage):''}`:`第${G.round+1}節`;
+  let headline;
+  if(draw)headline=`互角の死闘、痛み分け`;
+  else if(margin>=200)headline=`${wn.name} 圧勝`;
+  else if(margin>=150&&hadCatch)headline=`${wn.name}、スニッチで決着`;
+  else headline=`${wn.name} ${pick(['競り勝つ','逃げ切る','勝利を手繰り寄せる','意地を見せる'])}`;
+  const verb=draw?'壮絶な打ち合いの末':(margin>=160?(hadCatch?'スニッチ捕獲が明暗を分け':'地力の差を見せつけ'):'接戦を制し');
+  const lede=`<p>${kind}、${home.name} 対 ${away.name}の一戦は <b>${m.hs}–${m.as}</b> で${draw?'引き分けに終わった':`${wn.name}が${ln.name}を下した`}。${verb}、${pick(['スタンドは大いに沸いた','観衆を魅了する好ゲームとなった','記憶に残る一戦となった','両軍譲らぬ熱戦となった'])}。</p>`+
+    (scorers[0]?`<p>${pick(['この日の主役は','勝負を分けたのは','光を放ったのは'])} ${scorers[0].p.name}。${catcher?`シーカー ${catcher.p.name} のスニッチ捕獲も大きく試合を動かした。`:''}</p>`:(catcher?`<p>シーカー ${catcher.p.name} のスニッチ捕獲が勝敗を分けた。</p>`:''));
+  const scoreBox=`<div class="np-box"><div class="bt">得点者</div>${scorers.length?scorers.map(x=>`<span class="np-row"><span>${x.p.name} <span class="muted" style="font-size:11px">${x.club.name}</span></span><span class="gold">${x.g*10}点</span></span>`).join(''):'<span class="tiny muted">クアッフル得点なし</span>'}${catcher?`<span class="np-row" style="margin-top:4px"><span>🟡 スニッチ捕獲 ${catcher.p.name}</span><span class="gold">+150</span></span>`:''}</div>`;
+  const tag=userWon?'🦁 我が軍 勝利':draw?'痛み分け':'雪辱を期す';
+  const toneLab=userWon?'歓喜':draw?'激闘':'無念';
+  return `${NP_CSS}
+  <div class="np-paper" style="margin-top:16px;border-color:${userWon?'var(--gold)':draw?'var(--line2)':'#5a3631'}">
+    <div class="np-mast" style="padding:12px 16px 8px">
+      <div class="np-titl" style="font-size:23px">日刊預言者新聞 ・ 号外</div>
+      <div class="np-sub"><span>試合速報</span><span>シーズン${G.seasonNo} ・ ${kind}</span><span>${tag}</span></div>
+    </div>
+    <div class="np-body" style="padding:14px 16px">
+      <div class="lab" style="font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--aqua);font-weight:800">${toneLab}</div>
+      <h2 style="font-family:Georgia,serif;font-size:23px;line-height:1.25;margin:4px 0 8px">${headline}</h2>
+      <div style="display:flex;align-items:center;justify-content:center;gap:16px;margin:10px 0 14px">
+        <div style="text-align:center"><div class="crest" style="margin:0 auto 4px">${crestSVG(home.idx,38)}</div><div class="tiny">${home.name}</div></div>
+        <div style="font-size:30px;font-weight:800;letter-spacing:.02em">${m.hs} <span class="muted">–</span> ${m.as}</div>
+        <div style="text-align:center"><div class="crest" style="margin:0 auto 4px">${crestSVG(away.idx,38)}</div><div class="tiny">${away.name}</div></div>
+      </div>
+      <div class="np-drop">${lede}</div>
+      <div class="np-boxes" style="margin-top:10px">${scoreBox}</div>
+      <div style="text-align:center;margin-top:14px"><button class="btn gold" id="fin">結果を確定して次へ ▶</button></div>
+    </div>
+  </div>`;
+}
+
 /* ============================================================
    MATCH SCREEN + PLAYBACK
 ============================================================ */
@@ -2667,15 +2715,7 @@ function renderMatch(){
   }
   function finish(){
     pp.disabled=true;skip.disabled=true;pp.textContent="試合終了";
-    const m2=G.match;const win=(m2.isHome&&m2.hs>m2.as)||(!m2.isHome&&m2.as>m2.hs);const draw=m2.hs===m2.as;
-    document.getElementById("postmatch").innerHTML=`
-      <div class="card" style="margin-top:16px;text-align:center;border-color:${win?'var(--aqua)':draw?'var(--line2)':'#5a3631'}">
-        <div class="card-b">
-          <div class="cz" style="font-size:18px;color:${win?'var(--aqua)':draw?'var(--muted)':'var(--quaffle)'}">${win?'勝利！':draw?'引き分け':'敗戦'}</div>
-          <div style="font-size:24px;font-weight:800;margin:6px 0">${G.clubs[m2.home].name} ${m2.hs} - ${m2.as} ${G.clubs[m2.away].name}</div>
-          <button class="btn gold" id="fin" style="margin-top:8px">結果を確定して次へ ▶</button>
-        </div>
-      </div>`;
+    document.getElementById("postmatch").innerHTML=matchReportPaper(G.match);
     document.getElementById("fin").onclick=()=>{if(G.match&&G.match.kind==='playoff')finalizePlayoffGame();else finalizeRound();};
   }
   function step(){
