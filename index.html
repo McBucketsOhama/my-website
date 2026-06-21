@@ -873,9 +873,18 @@ function newGame(userIdx,managerName){
   usedNames.clear();_pid=1;
   const clubs=TEAMS.map((t,i)=>({
     idx:i,name:t.name,str:t.str,squad:makeSquadFrom(t),
-    tactic:{style:"balanced",seeker:"smart"},
+    tactic:{style:"balanced",seeker:"smart",formation:"line",tempo:"normal",press:"normal",beater:"balanced"},
     P:0,W:0,D:0,L:0,PF:0,PA:0,
   }));
+  // AIクラブは個性的な戦術プロファイルを持ち、試合展開に差が出る
+  clubs.forEach((c,i)=>{ if(i!==userIdx) c.tactic={
+    style:    pick(["superatk","attack","balanced","balanced","defense"]),
+    seeker:   pick(["aggressive","smart","smart","late"]),
+    formation:pick(["arrow","line","line","diamond"]),
+    tempo:    pick(["fast","normal","normal","slow"]),
+    press:    pick(["high","normal","normal","low"]),
+    beater:   pick(["attack","balanced","balanced","defense"]),
+  };});
   G={
     user:userIdx,manager:managerName||"あなた",
     clubs,
@@ -949,17 +958,62 @@ const STYLE={
   balanced:{atk:1.00,def:1.00,label:"バランス"},
   defense: {atk:0.90,def:1.12,label:"守備的"},
 };
+/* チェイサーの隊形 ── 攻守バランスを配分し直す */
+const FORMATION={
+  arrow:  {label:"楔形 (攻撃)", chAtk:1.13, chDef:0.84},
+  line:   {label:"横列 (標準)", chAtk:1.00, chDef:1.00},
+  diamond:{label:"菱形 (守備)", chAtk:0.89, chDef:1.20},
+};
+/* テンポ ── 試合の得点機会の多さと終盤の消耗 */
+const TEMPO={
+  fast:  {label:"高速", chance:1.16, fatigue:0.90},
+  normal:{label:"標準", chance:1.00, fatigue:1.00},
+  slow:  {label:"低速", chance:0.86, fatigue:1.05},
+};
+/* プレッシング ── 相手の攻撃を抑えるが体力を消耗する */
+const PRESS={
+  high:  {label:"ハイプレス", oppAtk:0.88, fatigue:0.90, def:1.00},
+  normal:{label:"標準",       oppAtk:1.00, fatigue:1.00, def:1.00},
+  low:   {label:"リトリート", oppAtk:1.05, fatigue:1.04, def:1.06},
+};
+/* ブラッジャー戦術 ── ビーターを攻撃支援/守備に振る */
+const BEATER={
+  attack:  {label:"攻撃支援", atk:1.07, def:0.97, disrupt:1.45},
+  balanced:{label:"バランス", atk:1.00, def:1.00, disrupt:1.00},
+  defense: {label:"守備固め", atk:0.96, def:1.08, disrupt:0.65},
+};
+/* 戦術オブジェクトを正規化（旧セーブや欠損フィールドに耐える） */
+function tac(club){
+  const t=(club&&club.tactic)||{};
+  return {
+    style:    STYLE[t.style]        ? t.style     : "balanced",
+    seeker:   t.seeker              || "smart",
+    formation:FORMATION[t.formation]? t.formation : "line",
+    tempo:    TEMPO[t.tempo]        ? t.tempo     : "normal",
+    press:    PRESS[t.press]        ? t.press     : "normal",
+    beater:   BEATER[t.beater]      ? t.beater    : "balanced",
+  };
+}
 function ratings(club,lu){
   const P=lineupPlayers(club,lu);
   const ch=P.filter(p=>p.pos==="CH"),be=P.filter(p=>p.pos==="BE"),ke=P.find(p=>p.pos==="KE"),se=P.find(p=>p.pos==="SE");
   const avg=(arr,f)=>arr.length?arr.reduce((s,p)=>s+f(p),0)/arr.length:40;
-  const s=STYLE[club.tactic.style];
-  const atk=(avg(ch,p=>p.att*.5+p.tec*.3+p.spd*.2))*s.atk;
-  const def=((ke?ke.def:40)*.5 + avg(be,p=>p.def)*.3 + avg(ch,p=>p.def)*.2)*s.def + avg(be,p=>p.att)*.06;
+  const T=tac(club);
+  const s=STYLE[T.style], fm=FORMATION[T.formation], pr=PRESS[T.press], bt=BEATER[T.beater], tp=TEMPO[T.tempo];
+  const atk=(avg(ch,p=>p.att*.5+p.tec*.3+p.spd*.2))*fm.chAtk*s.atk*bt.atk;
+  const def=((ke?ke.def:40)*.5 + avg(be,p=>p.def)*.3 + (avg(ch,p=>p.def)*fm.chDef)*.2)*s.def*bt.def*pr.def + avg(be,p=>p.att)*.06;
   const seek=se?(se.spd*.45+se.tec*.25+se.men*.3):40;
-  return {atk,def,seek,se:se,ch,be,ke};
+  return {atk,def,seek,se:se,ch,be,ke,
+    beat:avg(be,p=>p.att), sta:avg(P,p=>p.sta), tempo:tp, press:pr, beater:bt};
 }
 function scoreProb(atk,def){return clamp(0.25+(atk-def)/120,0.05,0.74);}
+/* 終盤の消耗 ── テンポ/プレスで疲れ、体力(sta)が高いほど耐える */
+function staminaMul(R,prog){
+  const fatigue=R.tempo.fatigue*R.press.fatigue;           // 概ね <=1
+  const resist=clamp((R.sta-55)/180,-0.10,0.12);
+  const drain=Math.max(0,1-fatigue)*prog*(1-resist);
+  return clamp(1-drain,0.72,1.05);
+}
 
 const GOAL_LINES=[
   "%P% が鮮やかなクアッフルゴール！",
@@ -997,11 +1051,21 @@ function simulateMatch(home,away,homeLu,awayLu){
   };
   for(let tick=1;tick<=92&&!caught;tick++){
     min+=ri(5,9);
-    if(rng()<scoreProb(H.atk,A.def)){hs+=10;const s=H.ch.length?pick(H.ch):null;snap("goal",`${s?s.name:"選手"} のクアッフルゴール！ ${home.name} 加点。`,{sid:s?s.id:null});}
+    const prog=tick/92;
+    // 終盤の消耗を反映した実効守備力
+    const hDef=H.def*staminaMul(H,prog), aDef=A.def*staminaMul(A,prog);
+    // ブラッジャー戦術: ビーターが相手の攻撃を寸断するか
+    const aDis=A.be.length&&rng()<0.12*A.beater.disrupt*clamp(A.beat/70,0.5,1.5);
+    const hDis=H.be.length&&rng()<0.12*H.beater.disrupt*clamp(H.beat/70,0.5,1.5);
+    // ホーム攻撃（テンポで機会増、相手プレスとブラッジャーで抑制）
+    if(rng()<scoreProb(H.atk*H.tempo.chance*A.press.oppAtk*(aDis?0.40:1),aDef)){hs+=10;const s=H.ch.length?pick(H.ch):null;snap("goal",`${s?s.name:"選手"} のクアッフルゴール！ ${home.name} 加点。`,{sid:s?s.id:null});}
     else if(rng()<0.16&&A.ke){snap("save",`${A.ke.name} が好セーブで枠を死守。`);}
-    if(rng()<scoreProb(A.atk,H.def)){as+=10;const s=A.ch.length?pick(A.ch):null;snap("goal",`${s?s.name:"選手"} のクアッフルゴール！ ${away.name} 加点。`,{sid:s?s.id:null});}
+    // アウェイ攻撃
+    if(rng()<scoreProb(A.atk*A.tempo.chance*H.press.oppAtk*(hDis?0.40:1),hDef)){as+=10;const s=A.ch.length?pick(A.ch):null;snap("goal",`${s?s.name:"選手"} のクアッフルゴール！ ${away.name} 加点。`,{sid:s?s.id:null});}
     else if(rng()<0.16&&H.ke){snap("save",`${H.ke.name} が好セーブ。`);}
-    if(rng()<0.13){const bt=rng()<.5?H:A;if(bt.be.length)snap("beat",`${nm(bt.be)} のブラッジャーが攻撃を寸断。`);}
+    // 攻撃を寸断した側を実況
+    if(aDis)snap("beat",`${nm(A.be)} のブラッジャーが ${home.name} の攻撃を寸断！`);
+    else if(hDis)snap("beat",`${nm(H.be)} のブラッジャーが ${away.name} の攻撃を寸断！`);
     if(tick===appear)snap("snitch",`✨ スニッチ出現！ ${H.se?H.se.name:"?"} と ${A.se?A.se.name:"?"} が追い始める！`);
     if(tick>=appear){
       const since=tick-appear;
@@ -1735,6 +1799,7 @@ function renderTactics(){
     return rows;
   };
   const r=ratings(club,lu);
+  const T=tac(club);
   return `
   <p class="eyebrow">戦術・フォーメーション</p>
   <div class="grid cols-2">
@@ -1753,20 +1818,34 @@ function renderTactics(){
   <div class="grid cols-2" style="margin-top:16px">
     <div class="card"><div class="card-h"><h3>チームの方針</h3></div><div class="card-b">
       <div class="eyebrow">スタイル</div>
-      <div class="seg" style="margin:6px 0 16px">${Object.keys(STYLE).map(k=>`<button data-style="${k}" class="${club.tactic.style===k?'on':''}">${STYLE[k].label}</button>`).join("")}</div>
+      <div class="seg" style="margin:6px 0 16px">${Object.keys(STYLE).map(k=>`<button data-style="${k}" class="${T.style===k?'on':''}">${STYLE[k].label}</button>`).join("")}</div>
+      <div class="eyebrow">隊形 (チェイサーの配置)</div>
+      <div class="seg" style="margin:6px 0 16px">${Object.keys(FORMATION).map(k=>`<button data-formation="${k}" class="${T.formation===k?'on':''}">${FORMATION[k].label}</button>`).join("")}</div>
+      <div class="eyebrow">テンポ</div>
+      <div class="seg" style="margin:6px 0 16px">${Object.keys(TEMPO).map(k=>`<button data-tempo="${k}" class="${T.tempo===k?'on':''}">${TEMPO[k].label}</button>`).join("")}</div>
+      <div class="eyebrow">プレッシング</div>
+      <div class="seg" style="margin:6px 0 16px">${Object.keys(PRESS).map(k=>`<button data-press="${k}" class="${T.press===k?'on':''}">${PRESS[k].label}</button>`).join("")}</div>
+      <div class="eyebrow">ブラッジャー戦術</div>
+      <div class="seg" style="margin:6px 0 16px">${Object.keys(BEATER).map(k=>`<button data-beater="${k}" class="${T.beater===k?'on':''}">${BEATER[k].label}</button>`).join("")}</div>
       <div class="eyebrow">シーカーの指示</div>
       <div class="seg" style="margin-top:6px">
-        <button data-seeker="aggressive" class="${club.tactic.seeker==='aggressive'?'on':''}">積極捕獲</button>
-        <button data-seeker="smart" class="${club.tactic.seeker==='smart'?'on':''}">状況判断</button>
-        <button data-seeker="late" class="${club.tactic.seeker==='late'?'on':''}">リード後に捕獲</button>
+        <button data-seeker="aggressive" class="${T.seeker==='aggressive'?'on':''}">積極捕獲</button>
+        <button data-seeker="smart" class="${T.seeker==='smart'?'on':''}">状況判断</button>
+        <button data-seeker="late" class="${T.seeker==='late'?'on':''}">リード後に捕獲</button>
       </div>
-      <p class="tiny muted" style="margin-top:12px">「積極捕獲」は早くスニッチを狙い、「状況判断」は捕れば勝てる時だけ狙います。「リード後」はチェイサーが得点を稼ぐ時間を作ります。</p>
     </div></div>
     <div class="card"><div class="card-h"><h3>チーム評価値</h3></div><div class="card-b">
       ${ratingBar("攻撃力",r.atk,140)}
       ${ratingBar("守備力",r.def,120)}
       ${ratingBar("シーカー",r.seek,99)}
-      <p class="tiny muted" style="margin-top:10px">スタイルとラインナップに応じて変化します。</p>
+      <p class="tiny muted" style="margin-top:14px;line-height:1.7">
+        <b>隊形</b>：チェイサーを攻撃/守備へ配分。<br>
+        <b>テンポ</b>：高速ほど得点機会が増えるが終盤に消耗。<br>
+        <b>プレッシング</b>：相手の攻撃を抑えるが体力を削る。<br>
+        <b>ブラッジャー</b>：攻撃支援は相手の攻撃を寸断しやすく、守備固めは失点を抑える。<br>
+        <b>シーカー</b>：「積極」は早く、「状況判断」は勝てる時、「リード後」は加点を待ってから捕獲を狙う。
+      </p>
+      <p class="tiny muted" style="margin-top:8px">評価値は隊形・スタイル・ブラッジャー戦術とラインナップを反映します（テンポ／プレスは試合中に作用）。</p>
     </div></div>
   </div>`;
 }
@@ -2164,7 +2243,7 @@ function renderMatch(){
    ACTION BINDING (event delegation on document)
 ============================================================ */
 document.addEventListener("click",e=>{
-  const t=e.target.closest("[data-view],[data-train],[data-style],[data-seeker],[data-sign],[data-release],[data-detail],[data-rankcat],[data-rankpos],[data-rankmetric],[data-loadslot],[data-delslot],[data-delok],[data-tpartner],[data-tgive],[data-tget],[data-tcash],[data-acceptoffer],[data-declineoffer],[data-fxfilter],#play,#poPlay,#autoLu,#scout,#nextSeason,#closeDetail,#saveFile,#loadBtn,#quickSave,#quickLoad,#continueSave,#openSlots,#slotsClose,#slotsBackdrop,#slotSaveNew,#delCancel,#sendTrade");
+  const t=e.target.closest("[data-view],[data-train],[data-style],[data-formation],[data-tempo],[data-press],[data-beater],[data-seeker],[data-sign],[data-release],[data-detail],[data-rankcat],[data-rankpos],[data-rankmetric],[data-loadslot],[data-delslot],[data-delok],[data-tpartner],[data-tgive],[data-tget],[data-tcash],[data-acceptoffer],[data-declineoffer],[data-fxfilter],#play,#poPlay,#autoLu,#scout,#nextSeason,#closeDetail,#saveFile,#loadBtn,#quickSave,#quickLoad,#continueSave,#openSlots,#slotsClose,#slotsBackdrop,#slotSaveNew,#delCancel,#sendTrade");
   if(!t)return;
   if(t.dataset.tpartner){G.trade.partner=+t.dataset.tpartner;G.trade.get=[];render();return;}
   if(t.dataset.tgive){const id=+t.dataset.tgive;G.trade.give=G.trade.give.includes(id)?G.trade.give.filter(x=>x!==id):[...G.trade.give,id];render();return;}
@@ -2198,6 +2277,10 @@ document.addEventListener("click",e=>{
   if(t.dataset.view){G.view=t.dataset.view;_detailId=null;render();return;}
   if(t.dataset.train){G.training=t.dataset.train;render();return;}
   if(t.dataset.style){G.clubs[G.user].tactic.style=t.dataset.style;render();return;}
+  if(t.dataset.formation){G.clubs[G.user].tactic.formation=t.dataset.formation;render();return;}
+  if(t.dataset.tempo){G.clubs[G.user].tactic.tempo=t.dataset.tempo;render();return;}
+  if(t.dataset.press){G.clubs[G.user].tactic.press=t.dataset.press;render();return;}
+  if(t.dataset.beater){G.clubs[G.user].tactic.beater=t.dataset.beater;render();return;}
   if(t.dataset.seeker){G.clubs[G.user].tactic.seeker=t.dataset.seeker;render();return;}
   if(t.dataset.sign){signPlayer(+t.dataset.sign);return;}
   if(t.dataset.release){releasePlayer(+t.dataset.release);return;}
