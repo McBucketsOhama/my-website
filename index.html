@@ -1219,7 +1219,10 @@ function faWeekNo(){const fas=CALENDAR.map((c,i)=>({c,i})).filter(x=>x.c.type===
 /* 週送り（試合なしの週: バイ/コンバイン/FA） */
 function passWeek(){
   const c=calWeek();
-  if(c.type==='bye'){applyTraining(G.clubs[G.user],G.training);injuryCheck();G.clubs.forEach(cl=>{if(cl.idx!==G.user)applyTraining(cl,'balanced');});}
+  if(c.type==='bye'){
+    applyTraining(G.clubs[G.user],G.training);injuryCheck();G.clubs.forEach(cl=>{if(cl.idx!==G.user)applyTraining(cl,'balanced');});
+    G.offers=[];pushNews('🔒','トレードデッドライン（バイウィーク）を経過。今季のトレードは締め切られました。');
+  }
   G.week++;
   const n=CALENDAR[G.week];
   if(!n){G.week=0;newSeason();return;}
@@ -1590,7 +1593,15 @@ function executeTrade(pi,give,get,cash){
   const rn=getPlayers.map(p=>p.name).join("・")||"（なし）";
   pushNews("🤝",`${partner.name} とトレード成立: OUT ${gn}${cash?` +${gold(cash)}`:""} ／ IN ${rn}。`);
 }
+/* トレードデッドライン = バイウィーク（1月第2週）。以降はプレーオフ終了まで取引不可、オフシーズンに再開 */
+function tradeDeadlineWeek(){return calIndex('bye');}
+function tradeOpen(){
+  if(G.phase==='offseason')return true;
+  if(G.phase!=='regular')return false;
+  return (G.week||0)<=tradeDeadlineWeek();
+}
 function sendTradeOffer(){
+  if(!tradeOpen()){flash("トレード期間外です（デッドライン経過 または プレーオフ中）。");return;}
   const tr=G.trade, pi=tr.partner;
   if(pi==null){flash("相手クラブを選んでください。");return;}
   const reasons=tradeReasons(pi,tr.give,tr.get,tr.cash);
@@ -1608,7 +1619,7 @@ function sendTradeOffer(){
 }
 /* AI -> user incoming offers */
 function maybeGenerateOffer(){
-  if(G.phase!=="regular")return;
+  if(G.phase!=="regular"||G.week>tradeDeadlineWeek())return; // デッドライン後は新規オファーなし
   if((G.offers||[]).length>=3)return;
   if(rng()>0.5)return; // ~50% chance per round when slots free
   const me=G.clubs[G.user];
@@ -1632,6 +1643,7 @@ function maybeGenerateOffer(){
   pushNews("📨",`${partner.name} からトレードオファー: ${give.name} ${cashToUser?`＋${gold(cashToUser)}`:""} ⇄ あなたの ${want.name}。`);
 }
 function acceptOffer(oid){
+  if(!tradeOpen()){flash("トレード期間外です（デッドライン経過）。");return;}
   const o=(G.offers||[]).find(x=>x.id===oid);if(!o)return;
   const me=G.clubs[G.user], partner=G.clubs[o.pi];
   const want=getP(me,o.wantId), give=getP(partner,o.giveId);
@@ -2154,6 +2166,11 @@ function renderTrade(){
   const me=G.clubs[G.user];
   const tr=G.trade;
   const partners=G.clubs.filter(c=>c.idx!==G.user);
+  const dlw=CALENDAR[tradeDeadlineWeek()];const dl=`${dlw.m}月第${dlw.w}週`;
+  const tOpen=tradeOpen();
+  const deadlineBanner=tOpen
+    ? `<div class="card" style="margin-bottom:12px;border-color:var(--gold-soft)"><div class="card-b tiny"><span class="gold">●</span> トレード受付中 ・ デッドライン <b>${dl}（バイウィーク）</b>${G.phase==='offseason'?' ・ <span class="aqua">オフシーズン取引可</span>':''}</div></div>`
+    : `<div class="card" style="margin-bottom:12px;border-color:#5a3631"><div class="card-b tiny" style="color:var(--quaffle)">🔒 トレード期間外（デッドライン経過 または プレーオフ中）。次の取引可能期間はオフシーズンです。</div></div>`;
   // incoming offers
   let offersHTML="";
   if(G.offers.length){
@@ -2171,7 +2188,7 @@ function renderTrade(){
   // partner picker
   const picker=`<div class="seg" style="flex-wrap:wrap;margin-bottom:12px">${partners.map(c=>`<button data-tpartner="${c.idx}" class="${tr.partner===c.idx?'on':''}">${c.name}</button>`).join("")}</div>`;
   if(tr.partner==null){
-    return `<p class="eyebrow">トレード</p>${offersHTML}
+    return `<p class="eyebrow">トレード</p>${deadlineBanner}${offersHTML}
       <div class="card"><div class="card-b">${capBar(me)}</div></div>
       <p class="muted" style="margin:14px 0 8px">トレード相手のクラブを選択してください。</p>${picker}`;
   }
@@ -2183,7 +2200,7 @@ function renderTrade(){
   const paAfter=payroll(partner)-sumSalary(tr.get,partner)+sumSalary(tr.give,me);
   const prob=tradeAcceptProb(tr.partner,tr.give,tr.get,tr.cash);
   const reasons=tradeReasons(tr.partner,tr.give,tr.get,tr.cash);
-  const canSend=(tr.give.length||tr.cash)&&tr.get.length&&reasons.length===0;
+  const canSend=tOpen&&(tr.give.length||tr.cash)&&tr.get.length&&reasons.length===0;
   const list=(club,squad,sel,attr)=>squad.slice().sort((a,b)=>overall(b)-overall(a)).map(p=>{
     const on=sel.includes(p.id);
     return `<button class="trade-pick ${on?'on':''}" data-${attr}="${p.id}">
@@ -2193,7 +2210,7 @@ function renderTrade(){
       <span class="ovr ${ovrTier(overall(p))}">${overall(p)}</span></button>`;
   }).join("");
   const probColor=prob>=66?'aqua':prob>=33?'gold':'quaffle';
-  return `<p class="eyebrow">トレード</p>${offersHTML}
+  return `<p class="eyebrow">トレード</p>${deadlineBanner}${offersHTML}
    ${picker}
    <div class="grid cols-2" style="gap:14px">
      <div class="card"><div class="card-h"><h3>放出（${me.name}）</h3></div><div class="card-b" style="padding:8px"><div class="trade-list">${list(me,me.squad,tr.give,"tgive")}</div></div></div>
@@ -2292,6 +2309,34 @@ function renderRankings(){
 }
 
 /* ---------- FIXTURES ---------- */
+function userOppForRound(round){
+  const fx=G.schedule[round];if(!fx)return null;
+  const me=fx.find(([h,a])=>h===G.user||a===G.user);if(!me)return null;
+  const isHome=me[0]===G.user;const opp=G.clubs[isHome?me[1]:me[0]];
+  const res=(G.results[round]||[]).find(x=>x.h===me[0]&&x.a===me[1]);
+  return {opp,isHome,res};
+}
+function renderSeasonSchedule(){
+  const rows=CALENDAR.map((c,i)=>{
+    const cur=i===(G.week||0);
+    let detail='';
+    if(c.type==='match'){const u=userOppForRound(c.round);if(u){const r=u.res;const gf=r?(u.isHome?r.hs:r.as):null,ga=r?(u.isHome?r.as:r.hs):null;detail=`${u.isHome?'<span class="aqua">H</span>':'<span class="muted">A</span>'} vs ${u.opp.name} ${r?`<b class="${gf>ga?'gold':''}">${gf}–${ga}</b>`:''}`;}}
+    else if(c.type==='bye')detail='<span class="aqua">バイウィーク ・ 🔒トレードデッドライン</span>';
+    else if(c.type==='po')detail='プレーオフ';
+    else if(c.type==='combine')detail='ドラフトコンバイン';
+    else if(c.type==='draft')detail='新人ドラフト';
+    else if(c.type==='fa')detail='<span class="aqua">FA契約期間（取引可）</span>';
+    else if(c.type==='preseason')detail='プレシーズン（親善）';
+    return `<div style="display:flex;gap:10px;align-items:center;padding:5px 10px;border-bottom:1px solid var(--line);${cur?'background:rgba(230,185,79,.10);border-left:3px solid var(--gold)':'border-left:3px solid transparent'}">
+      <span class="tiny" style="width:80px;color:${cur?'var(--gold)':'var(--muted2)'};font-weight:${cur?'800':'600'}">${c.m}月 第${c.w}週</span>
+      <span class="tiny" style="width:104px;font-weight:700">${calEvent(c)}</span>
+      <span class="tiny muted" style="flex:1;min-width:0">${detail}</span>
+      ${cur?'<span class="pill" style="color:var(--gold);border-color:var(--gold-soft)">今週</span>':''}
+    </div>`;
+  }).join('');
+  return `<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>シーズンスケジュール ・ シーズン${G.seasonNo}</h3><span class="tiny muted">10月開幕〜翌9月</span></div>
+    <div class="card-b" style="padding:0;max-height:520px;overflow-y:auto">${rows}</div></div>`;
+}
 function renderFixtures(){
   G.fxFilter=G.fxFilter||"all";
   const mineOnly=G.fxFilter==="mine";
@@ -2313,6 +2358,8 @@ function renderFixtures(){
     return `<div class="card" style="margin-bottom:12px"><div class="card-h"><h3>第 ${ri2+1} 節</h3>${ri2===G.round?'<span class="pill" style="color:var(--gold);border-color:var(--gold-soft)">今節</span>':played?'<span class="tiny muted">終了</span>':''}</div><div class="card-b" style="padding:8px 16px">${fixtures}</div></div>`;
   }).join("");
   return `<p class="eyebrow">シーズン日程・結果</p>
+   ${renderSeasonSchedule()}
+   <p class="eyebrow" style="margin-top:18px">節ごとの対戦・結果</p>
    <div class="seg" style="margin-bottom:12px">
      <button data-fxfilter="all" class="${G.fxFilter==='all'?'on':''}">全試合</button>
      <button data-fxfilter="mine" class="${G.fxFilter==='mine'?'on':''}">自クラブのみ</button>
