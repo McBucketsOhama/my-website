@@ -907,6 +907,7 @@ function newGame(userIdx,managerName){
   autoLineup(G.clubs[userIdx]);
   refreshMarket(true);
   pushNews("📜",`${G.clubs[userIdx].name} の新シーズンが始まりました。健闘を祈ります、${G.manager} 監督。`);
+  generateProspects();
   generateProphetPreseason();
   G.view="dashboard";
   autoSave();
@@ -1296,6 +1297,7 @@ function newSeason(){
   refreshMarket(true);
   autoLineup(G.clubs[G.user]);
   pushNews("🌅",`シーズン${G.seasonNo}が開幕。`);
+  generateProspects();
   generateProphetPreseason();
   autoSave();
   G.view="dashboard";render();
@@ -1591,6 +1593,7 @@ function reindexAfterLoad(){
   (G.clubs||[]).forEach(c=>(c.squad||[]).forEach(visit));
   (G.market||[]).forEach(visit);
   (G.draft&&G.draft.pool||[]).forEach(visit);
+  (G.prospects||[]).forEach(visit);
   _pid=maxId+1;
 }
 function loadFromString(str){
@@ -1710,6 +1713,7 @@ function render(){
     case "contracts":body=renderContracts();break;
     case "prophet":body=renderProphet();break;
     case "awards":body=renderAwards();break;
+    case "prospects":body=renderProspectRanking();break;
     case "draft":body=renderDraft();break;
     case "playoff":body=renderPlayoffHub();break;
     default:body=renderDashboard();
@@ -1722,7 +1726,7 @@ function renderShell(body){
   const club=G.clubs[G.user];
   const table=standings();
   const myPos=table.findIndex(c=>c.idx===G.user)+1;
-  const navItems=[["dashboard","ダッシュボード"],["prophet","新聞"],["squad","スカッド"],["tactics","戦術"],["transfers","移籍市場"],["trade","トレード"],["contracts","契約"],["table","順位表"],["rankings","ランキング"],["awards","アワード"],["fixtures","日程"]];
+  const navItems=[["dashboard","ダッシュボード"],["prophet","新聞"],["squad","スカッド"],["tactics","戦術"],["transfers","移籍市場"],["trade","トレード"],["contracts","契約"],["table","順位表"],["rankings","ランキング"],["awards","アワード"],["prospects","新人候補"],["fixtures","日程"]];
   if(G.phase==="draft")navItems.push(["draft","ドラフト"]);
   else if(G.phase!=="regular")navItems.push(["playoff","プレーオフ"]);
   app().innerHTML=`
@@ -2538,6 +2542,12 @@ function generateProphet(){
   if(wk>=4){const ar=awardRace();sections.push({kind:'box',title:'アワードレース（MVP予想）',html:ar.mvp.map(x=>npPlayerLine(x,`${overall(x.p)}`)).join('')+`<div class="tiny muted" style="margin-top:6px">最優秀OF: ${ar.off[0]?ar.off[0].p.name:'-'}／最優秀DF: ${ar.def[0]?ar.def[0].p.name:'-'}</div>`});}
   sections.push(npColumn(tbl));
   sections.push(npUserFocus());
+  // 今週の注目の若手（ドラフト候補から）
+  const pros=(G.prospects||[]).slice().sort((a,b)=>b.potential-a.potential);
+  if(pros.length){
+    const y=pros[(G.round)%Math.min(pros.length,6)];const s=schoolObj(y.school);
+    sections.push({kind:'article',lab:'今週の注目の若手',title:`期待の新星 ── ${y.name}`,byline:npBy(),html:`<p>${flag(y.nat)} <b>${y.name}</b>（${y.age}歳・${POS[y.pos].name}）。出身は<b>${s.short}</b>（${s.place}）。潜在能力${y.potential}を誇り、${pick(['次期ドラフトの目玉と目される','スカウト陣が熱視線を送る逸材だ','将来のスター候補として注目を集める','各クラブが争奪戦を繰り広げそうな存在だ'])}。${pick(['そのプレースタイルは早くも玄人筋を唸らせている。','学生時代から頭角を現してきた。','本紙は今後の成長を追い続ける。','ドラフトでの指名順位に注目が集まる。'])}</p>`});
+  }
   const injs=allPlayers().filter(x=>x.p.inj>0).sort((a,b)=>b.p.inj-a.p.inj).slice(0,5);
   if(injs.length)sections.push({kind:'article',lab:'メディカルリポート',title:'負傷者情報',byline:npBy(),html:injs.map(x=>`<p style="margin:4px 0">▪ ${x.p.name}（${G.clubs[x.club.idx].name}）── ${x.p.injType||'負傷'}、復帰まで約${x.p.inj}節。</p>`).join('')});
   sections.push(npGossip());
@@ -2556,8 +2566,8 @@ function generateProphetPreseason(){
   const kFav=allPlayers().filter(x=>x.p.pos==='KE'||x.p.pos==='BE').sort((a,b)=>overall(b.p)-overall(a.p))[0];
   const oFav=allPlayers().filter(x=>x.p.pos==='SE'||x.p.pos==='CH').sort((a,b)=>overall(b.p)-overall(a.p))[0];
   sections.push({kind:'article',lab:'アワード予想',title:'今季のMVPは誰の手に',byline:npBy(),html:`<p>本紙が選ぶ開幕前MVP候補は、${topByOvr.slice(0,3).map(x=>x.p.name).join('、')}。いずれもリーグ屈指の実力者で、所属クラブの成績次第で評価は大きく動くだろう。</p>`+`<p>最優秀ディフェンス候補は${kFav?kFav.p.name:'-'}、最優秀オフェンス候補は${oFav?oFav.p.name:'-'}に注目だ。</p>`});
-  const young=leagueYoung(5);
-  if(young.length)sections.push({kind:'article',lab:'ネクストスター',title:'ブレイク必至の若手たち',byline:npBy(),html:`<p>今季の飛躍が期待される若き才能を紹介する。</p>`+young.map(x=>`<p style="margin:4px 0">▪ ${flag(x.p.nat)} <b>${x.p.name}</b>（${x.p.age}歳・${POS[x.p.pos].short}・${G.clubs[x.club.idx].name}）── 潜在能力${x.p.potential}。${pick(['化ければ主力級。','今季の台頭に期待。','スカウト陣も高評価。','大器の予感。'])}</p>`).join('')});
+  const young=(G.prospects||[]).slice().sort((a,b)=>b.potential-a.potential).slice(0,5);
+  if(young.length)sections.push({kind:'article',lab:'ネクストスター',title:'次期ドラフト 注目の候補生',byline:npBy(),html:`<p>来たる新人ドラフトに向け、世界の魔法学校から集う逸材を紹介する。</p>`+young.map(p=>`<p style="margin:4px 0">▪ ${flag(p.nat)} <b>${p.name}</b>（${p.age}歳・${POS[p.pos].short}・🏰${schoolObj(p.school).short}）── 潜在能力${p.potential}。${pick(['化ければ主力級。','今季の目玉候補。','スカウト陣も高評価。','大器の予感。'])}</p>`).join('')});
   const pos=pred.findIndex(c=>c.idx===G.user)+1;
   sections.push({kind:'article',lab:'クラブ展望',title:`${G.clubs[G.user].name} 今季の鍵`,byline:npBy(),html:`<p>本紙予想では<b>${pos}位</b>スタートと見られる${G.clubs[G.user].name}。${pick(['攻守のバランスが取れており、','若手の伸びしろが大きく、','経験豊富な選手層を擁し、'])}采配次第で上位進出も十分に可能だ。鍵を握るのは序盤戦の勢いだろう。</p>`});
   sections.push(npGossip());
@@ -2569,7 +2579,7 @@ function generateProphetDraft(pool){
     `<p>シーズン${G.seasonNo}が終わり、注目の新人ドラフトが目前に迫った。本紙のスカウト網が捉えた逸材たちを紹介する。指名権は下位クラブが優先的に握る。</p>`+
     (n1?`<p>最大の目玉は${flag(n1.nat)} <b>${n1.name}</b>（${n1.age}歳・${POS[n1.pos].name}）。潜在能力${n1.potential}は今ドラフト随一で、下位クラブが指名権を争うことになりそうだ。</p>`:'')});
   sections.push({kind:'box',title:'上位指名予想',html:top.slice(0,6).map((p,i)=>`<span class="np-row"><span>${i+1}. ${p.name} <span class="muted" style="font-size:11px">${POS[p.pos].short}</span></span><span class="gold">POT ${p.potential}</span></span>`).join('')});
-  POS_ORDER.forEach(pos=>{const best=top.find(p=>p.pos===pos);if(best)sections.push({kind:'article',lab:POS[pos].name+'部門',title:`${POS[pos].name}の注目株: ${best.name}`,byline:npBy(),html:`<p>${flag(best.nat)} ${best.name}（${best.age}歳・OVR${overall(best)}／POT${best.potential}）。${pick(['即戦力に近い完成度を誇る。','荒削りだが将来性は抜群だ。','スピードと技術を兼ね備える。','大器の予感を漂わせる逸材。'])}${pick(['上位指名は確実とみられる。','化ければリーグを代表する選手に。','各クラブのスカウトが熱視線を送る。'])}</p>`});});
+  POS_ORDER.forEach(pos=>{const best=top.find(p=>p.pos===pos);if(best)sections.push({kind:'article',lab:POS[pos].name+'部門',title:`${POS[pos].name}の注目株: ${best.name}`,byline:npBy(),html:`<p>${flag(best.nat)} ${best.name}（${best.age}歳・🏰${schoolObj(best.school).short}・OVR${overall(best)}／POT${best.potential}）。${pick(['即戦力に近い完成度を誇る。','荒削りだが将来性は抜群だ。','スピードと技術を兼ね備える。','大器の予感を漂わせる逸材。'])}${pick(['上位指名は確実とみられる。','化ければリーグを代表する選手に。','各クラブのスカウトが熱視線を送る。'])}</p>`});});
   pushIssue({season:G.seasonNo,wk:0,type:'draft',sections});
 }
 
@@ -2619,6 +2629,34 @@ function renderProphet(){
 
 /* ---- 新人ドラフト ---- */
 const DRAFT_ROUNDS=2;
+/* 魔法学校（ドラフト候補の出身校） */
+const SCHOOLS=[
+  {name:"ホグワーツ魔法魔術学校",short:"ホグワーツ",place:"スコットランド"},
+  {name:"ボーバトン魔法アカデミー",short:"ボーバトン",place:"フランス・ピレネー山脈",femOnly:true},
+  {name:"ダームストラング専門学校",short:"ダームストラング",place:"北ヨーロッパ"},
+  {name:"イルヴァーモーニー魔法魔術学校",short:"イルヴァーモーニー",place:"米マサチューセッツ州"},
+  {name:"魔法処",short:"魔法処",place:"日本・硫黄島"},
+  {name:"カステロブルーショ",short:"カステロブルーショ",place:"ブラジル・アマゾン熱帯雨林"},
+  {name:"ワガドゥー魔法学校",short:"ワガドゥー",place:"ウガンダ・月の山脈"},
+  {name:"コルドフストレッツ",short:"コルドフストレッツ",place:"ロシア"},
+];
+const NAT_SCHOOL={
+  "アイルランド":"ホグワーツ魔法魔術学校","オーストラリア":"ホグワーツ魔法魔術学校",
+  "フランス":"ボーバトン魔法アカデミー","スペイン":"ボーバトン魔法アカデミー","イタリア":"ボーバトン魔法アカデミー",
+  "ノルウェー":"ダームストラング専門学校","ポーランド":"ダームストラング専門学校","ドイツ":"ダームストラング専門学校","オランダ":"ダームストラング専門学校",
+  "アメリカ":"イルヴァーモーニー魔法魔術学校","カナダ":"イルヴァーモーニー魔法魔術学校",
+  "日本":"魔法処","韓国":"魔法処",
+  "ブラジル":"カステロブルーショ","アルゼンチン":"カステロブルーショ","メキシコ":"カステロブルーショ","ポルトガル":"カステロブルーショ",
+  "ナイジェリア":"ワガドゥー魔法学校","ガーナ":"ワガドゥー魔法学校",
+  "ロシア":"コルドフストレッツ",
+};
+function schoolObj(name){return SCHOOLS.find(s=>s.name===name)||{name:name||"—",short:name||"—",place:""};}
+function assignSchool(p){
+  let s=(rng()<0.78&&NAT_SCHOOL[p.nat])?SCHOOLS.find(x=>x.name===NAT_SCHOOL[p.nat]):null;
+  if(!s)s=pick(SCHOOLS);
+  if(s.femOnly&&!p.fem)s=pick(SCHOOLS.filter(x=>!x.femOnly)); // ボーバトンは女子校
+  return s.name;
+}
 function makeProspect(){
   const pos=pick(POS_ORDER);
   const p=makePlayer(pos,ri(50,64));
@@ -2627,14 +2665,45 @@ function makeProspect(){
   const o=overall(p);
   p.potential=clamp(o+ri(8,22),o+6,99);
   p.star=false;p.years=3;
+  p.school=assignSchool(p);
   p.value=playerValue(p);p.salary=Math.round(contractSalary(p)*0.7/100)*100;
   return p;
+}
+/* シーズン中ずっと参照できるドラフト候補生クラス */
+function generateProspects(){
+  const n=G.clubs.length*DRAFT_ROUNDS+6;const arr=[];
+  for(let i=0;i<n;i++)arr.push(makeProspect());
+  arr.sort((a,b)=>b.potential-a.potential);
+  G.prospects=arr;
+}
+function renderProspectRanking(){
+  const list=((G.draft&&G.draft.pool)?G.draft.pool:(G.prospects||[])).slice().sort((a,b)=>b.potential-a.potential);
+  if(!list.length)return `<p class="eyebrow">ドラフト候補ランキング</p><div class="card"><div class="card-b center muted" style="padding:28px">現在、候補生のデータがありません。</div></div>`;
+  const rows=list.map((p,i)=>{
+    const s=schoolObj(p.school);
+    return `<tr>
+      <td class="center" style="font-weight:800;color:${i<3?'var(--gold)':'var(--muted2)'}">${i+1}</td>
+      <td><span class="ovr ${ovrTier(overall(p))}">${overall(p)}</span></td>
+      <td><div style="display:flex;align-items:center;gap:9px"><span class="ava">${avatarSVG(p,34,null)}</span>
+        <div><div class="player-name">${p.name}</div><div class="tiny muted">${flag(p.nat)} ${p.nat} ・ ${p.age}歳</div></div></div></td>
+      <td class="center"><span class="pos ${p.pos}">${POS[p.pos].short}</span></td>
+      <td><div class="player-name" style="font-size:13px">🏰 ${s.short}</div><div class="tiny muted">${s.place}</div></td>
+      <td class="center gold">${p.potential}</td>
+    </tr>`;
+  }).join("");
+  const note=(G.draft&&G.draft.pool)?'（ドラフト開催中・残りの候補）':`（シーズン${G.seasonNo}終了後のドラフト対象）`;
+  return `<p class="eyebrow">ドラフト候補ランキング ${note}</p>
+  <p class="tiny muted" style="margin-top:-4px">来たる新人ドラフトの注目候補。ポテンシャル順。出身は世界各地の魔法学校。</p>
+  <div class="card"><div class="card-b" style="padding:0;overflow-x:auto"><table>
+    <thead><tr><th class="center">#</th><th>OVR</th><th>選手</th><th class="center">位置</th><th>出身校</th><th class="center">POT</th></tr></thead>
+    <tbody>${rows}</tbody></table></div></div>`;
 }
 function startDraft(){
   const order=standings().map(c=>c.idx).reverse(); // 最下位から
   const seq=[];
   for(let r=0;r<DRAFT_ROUNDS;r++){const ord=(r%2===0)?order:order.slice().reverse();ord.forEach(i=>seq.push(i));} // スネーク
-  const pool=[];const n=seq.length+6;for(let i=0;i<n;i++)pool.push(makeProspect());
+  const pool=(G.prospects&&G.prospects.length)?G.prospects.slice():[];
+  const need=seq.length+6;while(pool.length<need)pool.push(makeProspect());
   pool.sort((a,b)=>b.potential-a.potential);
   G.draft={order:seq,pick:0,pool,log:[],rounds:DRAFT_ROUNDS};
   G.phase='draft';G.view='draft';
@@ -2679,7 +2748,7 @@ function renderDraft(){
   const pool=d.pool.slice().sort((a,b)=>b.potential-a.potential);
   const rows=pool.map(p=>`<tr>
     <td><span class="ovr ${ovrTier(overall(p))}">${overall(p)}</span></td>
-    <td><div style="display:flex;align-items:center;gap:8px"><span class="ava">${avatarSVG(p,32,null)}</span><div><div class="player-name">${p.name}</div><div class="tiny muted">${POS[p.pos].name} ・ ${flag(p.nat)} ${p.nat} ・ ${p.age}歳</div></div></div></td>
+    <td><div style="display:flex;align-items:center;gap:8px"><span class="ava">${avatarSVG(p,32,null)}</span><div><div class="player-name">${p.name}</div><div class="tiny muted">${flag(p.nat)} ${p.nat} ・ ${p.age}歳 ・ 🏰 ${schoolObj(p.school).short}</div></div></div></td>
     <td class="center"><span class="pos ${p.pos}">${POS[p.pos].short}</span></td>
     <td class="center gold">${p.potential}</td>
     <td class="num">${yourTurn?`<button class="btn sm gold" data-draft="${p.id}">指名</button>`:''}</td>
