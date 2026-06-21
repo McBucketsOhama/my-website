@@ -783,9 +783,9 @@ const NAT_NAMES={
 };
 const GEN_M=["ガレス","ブライス","オーウェン","ジャスパー","ブラム","フェリックス","セドリック","ドレイヴン"];
 const GEN_F=["ダリア","フィオナ","セレン","ウィロー","エヴリン","コーラ","イゾルデ","ローレル"];
-function genName(nat){
+function genName(nat,forceFem){
   const pool=NAT_NAMES[nat];
-  const fem=rng()<0.4;
+  const fem=(forceFem!==undefined)?forceFem:(rng()<0.4);
   const fl=pool?(fem?pool.f:pool.m):(fem?GEN_F:GEN_M);
   const ll=pool?pool.l:L_NAMES;
   for(let i=0;i<50;i++){const n=pick(fl)+" "+pick(ll);if(!usedNames.has(n)){usedNames.add(n);return {name:n,fem};}}
@@ -803,7 +803,7 @@ function makePlayer(pos,teamStr,opts){
   const nat=opts.nat||randNat();
   let name,fem;
   if(opts.name){name=opts.name;usedNames.add(name);fem=(opts.fem!==undefined)?opts.fem:isFemale(name);}
-  else{const g=genName(nat);name=g.name;fem=g.fem;}
+  else{const g=genName(nat,opts.fem);name=g.name;fem=g.fem;}
   const p={id:_pid++,name,pos,age,nat,fem,...st,
     fitness:100,form:0,inj:0,
     potential:0,value:0,star:!!opts.name,
@@ -1229,6 +1229,7 @@ function finalizeRound(){
     accumulateStats(q.ev,hl,al,G.clubs[h],G.clubs[a]);
     G.results[G.round].push({h,a,hs:q.hs,as:q.as});
   }
+  scoutProspects();
   generateProphet();
   applyTraining(G.clubs[G.user],G.training);
   injuryCheck();
@@ -2684,45 +2685,44 @@ function renderProphet(){
 
 /* ---- 新人ドラフト ---- */
 const DRAFT_ROUNDS=2;
-/* 魔法学校（ドラフト候補の出身校） */
+/* 魔法学校（ドラフト候補の出身校）。home=所在国, neighbors=周辺国 */
 const SCHOOLS=[
-  {name:"ホグワーツ魔法魔術学校",short:"ホグワーツ",place:"スコットランド"},
-  {name:"ボーバトン魔法アカデミー",short:"ボーバトン",place:"フランス・ピレネー山脈",femOnly:true},
-  {name:"ダームストラング専門学校",short:"ダームストラング",place:"北ヨーロッパ"},
-  {name:"イルヴァーモーニー魔法魔術学校",short:"イルヴァーモーニー",place:"米マサチューセッツ州"},
-  {name:"魔法処",short:"魔法処",place:"日本・硫黄島"},
-  {name:"カステロブルーショ",short:"カステロブルーショ",place:"ブラジル・アマゾン熱帯雨林"},
-  {name:"ワガドゥー魔法学校",short:"ワガドゥー",place:"ウガンダ・月の山脈"},
-  {name:"コルドフストレッツ",short:"コルドフストレッツ",place:"ロシア"},
+  {name:"ホグワーツ魔法魔術学校",short:"ホグワーツ",place:"スコットランド",home:"アイルランド",neighbors:["フランス","オランダ","ノルウェー"]},
+  {name:"ボーバトン魔法アカデミー",short:"ボーバトン",place:"フランス・ピレネー山脈",femOnly:true,home:"フランス",neighbors:["スペイン","イタリア"]},
+  {name:"ダームストラング専門学校",short:"ダームストラング",place:"北ヨーロッパ",home:"ノルウェー",neighbors:["ポーランド","ドイツ","ロシア"]},
+  {name:"イルヴァーモーニー魔法魔術学校",short:"イルヴァーモーニー",place:"米マサチューセッツ州",home:"アメリカ",neighbors:["カナダ","メキシコ"]},
+  {name:"魔法処",short:"魔法処",place:"日本・硫黄島",home:"日本",neighbors:["韓国"]},
+  {name:"カステロブルーショ",short:"カステロブルーショ",place:"ブラジル・アマゾン熱帯雨林",home:"ブラジル",neighbors:["アルゼンチン","メキシコ"]},
+  {name:"ワガドゥー魔法学校",short:"ワガドゥー",place:"ウガンダ・月の山脈",home:"ナイジェリア",neighbors:["ガーナ"]},
+  {name:"コルドフストレッツ",short:"コルドフストレッツ",place:"ロシア",home:"ロシア",neighbors:["ポーランド","ノルウェー"]},
 ];
-const NAT_SCHOOL={
-  "アイルランド":"ホグワーツ魔法魔術学校","オーストラリア":"ホグワーツ魔法魔術学校",
-  "フランス":"ボーバトン魔法アカデミー","スペイン":"ボーバトン魔法アカデミー","イタリア":"ボーバトン魔法アカデミー",
-  "ノルウェー":"ダームストラング専門学校","ポーランド":"ダームストラング専門学校","ドイツ":"ダームストラング専門学校","オランダ":"ダームストラング専門学校",
-  "アメリカ":"イルヴァーモーニー魔法魔術学校","カナダ":"イルヴァーモーニー魔法魔術学校",
-  "日本":"魔法処","韓国":"魔法処",
-  "ブラジル":"カステロブルーショ","アルゼンチン":"カステロブルーショ","メキシコ":"カステロブルーショ","ポルトガル":"カステロブルーショ",
-  "ナイジェリア":"ワガドゥー魔法学校","ガーナ":"ワガドゥー魔法学校",
-  "ロシア":"コルドフストレッツ",
-};
 function schoolObj(name){return SCHOOLS.find(s=>s.name===name)||{name:name||"—",short:name||"—",place:""};}
-function assignSchool(p){
-  let s=(rng()<0.78&&NAT_SCHOOL[p.nat])?SCHOOLS.find(x=>x.name===NAT_SCHOOL[p.nat]):null;
-  if(!s)s=pick(SCHOOLS);
-  if(s.femOnly&&!p.fem)s=pick(SCHOOLS.filter(x=>!x.femOnly)); // ボーバトンは女子校
-  return s.name;
-}
 function makeProspect(){
+  // 出身校を先に決め、80%は所在国・20%は周辺国の出身として生成
+  const school=pick(SCHOOLS);
+  const nat=(rng()<0.8||!school.neighbors.length)?school.home:pick(school.neighbors);
+  const fem=school.femOnly?true:undefined; // ボーバトンは女子校
   const pos=pick(POS_ORDER);
-  const p=makePlayer(pos,ri(50,64));
+  const p=makePlayer(pos,ri(50,64),{nat,fem});
   p.age=ri(17,20);
   trimToOVR(p,ri(58,70));
   const o=overall(p);
   p.potential=clamp(o+ri(8,22),o+6,99);
   p.star=false;p.years=3;
-  p.school=assignSchool(p);
+  p.school=school.name;
   p.value=playerValue(p);p.salary=Math.round(contractSalary(p)*0.7/100)*100;
   return p;
+}
+/* スカウト情報の更新：週ごとに候補生のOVR/ポテンシャル/順位が変動 */
+function scoutProspects(){
+  if(!G.prospects)return;
+  G.prospects.forEach(p=>{
+    if(rng()<0.35){const k=pick(Object.keys(POS[p.pos].w));p[k]=clamp(p[k]+(rng()<0.5?1:-1),25,99);}
+    if(rng()<0.5)p.potential=p.potential+ri(-2,2);
+    p.potential=clamp(p.potential,overall(p),99);
+    p.value=playerValue(p);
+  });
+  G.prospects.sort((a,b)=>b.potential-a.potential);
 }
 /* シーズン中ずっと参照できるドラフト候補生クラス */
 function generateProspects(){
