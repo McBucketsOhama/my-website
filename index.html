@@ -907,6 +907,7 @@ function newGame(userIdx,managerName){
   autoLineup(G.clubs[userIdx]);
   refreshMarket(true);
   pushNews("📜",`${G.clubs[userIdx].name} の新シーズンが始まりました。健闘を祈ります、${G.manager} 監督。`);
+  generateProphetPreseason();
   G.view="dashboard";
   autoSave();
 }
@@ -1295,6 +1296,7 @@ function newSeason(){
   refreshMarket(true);
   autoLineup(G.clubs[G.user]);
   pushNews("🌅",`シーズン${G.seasonNo}が開幕。`);
+  generateProphetPreseason();
   autoSave();
   G.view="dashboard";render();
 }
@@ -2377,38 +2379,168 @@ function renderAwards(){
 }
 
 /* ---- 日刊預言者新聞・クィディッチ欄 ---- */
+/* ===== 日刊預言者新聞（拡張版） ===== */
+const NP_COLUMNISTS=["リータ・スキーター","B・バグショット","G・オリバンダー","X・ラブグッド","I・ピンス","C・ワーベック","D・キャトモア"];
+function npBy(){return pick(NP_COLUMNISTS);}
+function clubStrength(c){const ps=lineupPlayers(c,bestLineup(c));return ps.length?ps.reduce((s,p)=>s+overall(p),0)/ps.length:50;}
+function predictedTable(){return G.clubs.slice().sort((a,b)=>clubStrength(b)-clubStrength(a));}
+function leagueYoung(n){return allPlayers().filter(x=>x.p.age<=21).sort((a,b)=>b.p.potential-a.p.potential).slice(0,n);}
+function npPlayerLine(x,extra){return `<span class="np-row"><span>${flag(x.p.nat)} ${x.p.name} <span class="muted" style="font-size:11px">${POS[x.p.pos].short}・${G.clubs[x.club.idx].name}</span></span><span class="gold">${extra}</span></span>`;}
+function npLeagueLeaders(){
+  const sc=allPlayers().filter(x=>x.p.season&&x.p.season.goals>0).sort((a,b)=>b.p.season.goals-a.p.season.goals).slice(0,5);
+  const ca=allPlayers().filter(x=>x.p.season&&x.p.season.catches>0).sort((a,b)=>b.p.season.catches-a.p.season.catches).slice(0,3);
+  return {sc,ca};
+}
+function awardRace(){
+  const pool=allPlayers().filter(x=>x.p.season&&x.p.season.gp>0);
+  const tbl=standings();const rankOf={};tbl.forEach((c,i)=>rankOf[c.idx]=i);
+  const rb=x=>Math.max(0,(G.clubs.length-rankOf[x.club.idx])*0.8);
+  return {
+    mvp:pool.slice().sort((a,b)=>mvpScore(b.p,rb(b))-mvpScore(a.p,rb(a))).slice(0,3),
+    off:pool.filter(x=>x.p.pos==="CH"||x.p.pos==="SE").sort((a,b)=>prodOff(b.p)-prodOff(a.p)).slice(0,2),
+    def:pool.filter(x=>x.p.pos==="KE"||x.p.pos==="BE").sort((a,b)=>prodDef(b.p)-prodDef(a.p)).slice(0,2),
+  };
+}
+function pushIssue(issue){G.prophet=G.prophet||[];G.prophet.unshift(issue);if(G.prophet.length>60)G.prophet.pop();G.prophetSel=0;}
+
+function npColumn(tbl){
+  const leader=tbl[0],second=tbl[1],last=tbl[tbl.length-1];
+  const topics=[
+    {t:`${leader.name}の首位は本物か`,b:`<p>勝点${leader.P}で首位を走る${leader.name}。${second?`${second.name}が${Math.max(0,leader.P-second.P)}差で続くが、`:''}その戦いぶりは安定感を増している。${pick(['補強の成果が出始めた','若手の台頭が大きい','戦術の徹底が光る','選手層の厚みが効いている'])}と見る向きが多い。</p>`},
+    {t:`混戦のプレーオフ争い`,b:`<p>上位8チームに入るための争いは熾烈だ。中位グループは勝点差わずかにひしめき、残り試合の一つひとつが順位を大きく動かしかねない。各クラブのベンチワークに注目が集まる。</p>`},
+    {t:`${last.name}に再建の青写真は`,b:`<p>最下位に沈む${last.name}。しかし若い世代には光るものがあり、次のドラフトと移籍市場での動き次第では一気に浮上する余地も残されている。フロントの手腕が問われる。</p>`},
+    {t:`戦術トレンドを読み解く`,b:`<p>今季は隊形とテンポの使い分けが勝敗を分けている。高速テンポで主導権を握るクラブがある一方、堅守速攻で番狂わせを演じるクラブも。${pick(['データはその有効性を裏付ける','ファンの間でも議論を呼んでいる'])}。</p>`},
+  ];
+  const c=pick(topics);
+  return {kind:'article',lab:'コラム ・ 論説',title:c.t,byline:npBy(),html:c.b+`<div class="np-quote">「${pick(['勝負はこれからだ','シーズンは長い','勢いこそが全て','細部が勝敗を分ける','栄光は準備した者に訪れる'])}」── 関係者談</div>`};
+}
+function npUserFocus(){
+  const me=G.clubs[G.user];const tbl=standings();const pos=tbl.findIndex(c=>c.idx===G.user)+1;
+  let last=null;for(let r=G.results.length-1;r>=0;r--){const arr=G.results[r];if(!arr)continue;const m=arr.find(x=>x.h===G.user||x.a===G.user);if(m){last=m;break;}}
+  let body=`<p>${me.name}は現在リーグ<b>${pos}位</b>。`;
+  if(last){const isH=last.h===G.user;const gf=isH?last.hs:last.as,ga=isH?last.as:last.hs;body+=`直近の一戦は ${gf}–${ga} で${gf>ga?'勝利':gf<ga?'惜敗':'引き分け'}だった。`;}
+  const fx=G.schedule[G.round+1];const nx=fx&&fx.find(([h,a])=>h===G.user||a===G.user);
+  if(nx){const opp=G.clubs[nx[0]===G.user?nx[1]:nx[0]];body+=`次節は${opp.name}との対戦が控える。`;}
+  const inj=me.squad.find(p=>p.inj>0);
+  if(inj)body+=`負傷の${inj.name}の状態が鍵を握りそうだ。`;
+  body+=`</p>`;
+  return {kind:'article',lab:'クラブ密着',title:`${me.name} 番記者ノート`,byline:npBy(),html:body};
+}
+function npGossip(){
+  const clubs=G.clubs;const a=pick(clubs),b=pick(clubs.filter(c=>c!==a));
+  const rumors=[
+    `${a.name}のフロントが大型補強に動いているとの情報を本紙は掴んだ。関係者は否定するが、火のない所に煙は立たぬ。`,
+    `${a.name}の主力に${b.name}が関心を示しているという。移籍市場が動くか、続報に注目だ。`,
+    `${pick(['ある監督','某クラブの幹部','リーグ関係者'])}が戦術の大幅刷新を画策しているとささやかれている。`,
+    `ロッカールームの不和説が流れる${a.name}。だが私の取材では、むしろ結束は固いようだ。`,
+    `${b.name}の若手が練習で目覚ましい成長を見せていると、複数の関係者が証言している。`,
+  ];
+  return {kind:'article',lab:'独占 ・ ゴシップ',title:'リータ・スキーターの羽根ペン',byline:'リータ・スキーター',html:`<p>${pick(rumors)} ${pick(['続報を待たれたい。','読者諸君の判断に委ねよう。','私の羽根ペンは真実だけを記す。','さて、真相やいかに。'])}</p>`};
+}
+
 function generateProphet(){
   const wk=G.round+1;const res=G.results[G.round]||[];
-  const tbl=standings();const leader=tbl[0];
-  let big=null;res.forEach(m=>{const d=Math.abs(m.hs-m.as);if(!big||d>big.d)big=Object.assign({},m,{d});});
-  const pool=allPlayers().filter(x=>x.p.season&&x.p.season.gp>0);
-  const topG=pool.slice().sort((a,b)=>b.p.season.goals-a.p.season.goals)[0];
-  const items=[];
-  if(big){const hn=G.clubs[big.h].name,an=G.clubs[big.a].name;const wn=big.hs>big.as?hn:an;items.push(`${wn} が ${Math.max(big.hs,big.as)}–${Math.min(big.hs,big.as)} で快勝。観客を沸かせた。`);}
-  items.push(`首位は ${leader.name}（勝点${leader.P}）。${tbl[1]?`2位 ${tbl[1].name} が勝点${Math.max(0,leader.P-tbl[1].P)}差で追走。`:''}`);
-  if(topG&&topG.p.season.goals>0)items.push(`得点ランクは ${topG.p.name}（${topG.club.name}）が ${topG.p.season.goals} ゴールで先頭。`);
-  const inj=G.clubs[G.user].squad.find(p=>p.inj>0);
-  if(inj)items.push(`負傷情報: あなたのクラブの ${inj.name} は${inj.injType?inj.injType+'で':''}あと ${inj.inj} 節の離脱見込み。`);
-  else items.push(pick(["移籍市場では各クラブが補強に動くとの噂。","ファンは週末の好カードに期待を寄せている。","解説者は上位陣の戦術的成熟を高く評価した。"]));
-  const headline=pick([`第${wk}節 詳報`,`クィディッチ・ウィークリー 第${wk}節`,`今節のハイライト`,`スタンドの熱狂 ── 第${wk}節`]);
-  G.prophet=G.prophet||[];
-  G.prophet.unshift({wk,season:G.seasonNo,headline,items});
-  if(G.prophet.length>40)G.prophet.pop();
+  const tbl=standings();
+  const sections=[];
+  let lead=res.find(m=>m.h===G.user||m.a===G.user);
+  if(!lead){let big=null;res.forEach(m=>{const d=Math.abs(m.hs-m.as);if(!big||d>big.d)big=Object.assign({},m,{d});});lead=big;}
+  if(lead){
+    const hn=G.clubs[lead.h].name,an=G.clubs[lead.a].name;const hw=lead.hs>lead.as;const wn=hw?hn:an,ln=hw?an:hn;
+    const ws=Math.max(lead.hs,lead.as),lsc=Math.min(lead.hs,lead.as);const draw=lead.hs===lead.as;
+    const verb=pick(["圧倒した","競り勝った","退けた","下した","振り切った"]);
+    const body=`<p>${hn} 対 ${an}の一戦は、${draw?`${ws}–${lsc}の激しい打ち合いとなった`:`${wn}が ${ws}–${lsc} で${ln}を${verb}`}。`+
+      `${(ws-lsc>=160)?'スニッチ捕獲が大勢を決し、':'クアッフルの応酬の末、'}スタンドのファンを大いに沸かせた。</p>`+
+      `<p>${pick(["立ち上がりから主導権を握った","序盤は拮抗したが","劣勢を跳ね返した","終始安定した戦いを見せた"])}${draw?'両者':wn}は、`+
+      `${pick(["チェイサー陣の連係","シーカーの集中力","ビーターの圧力","キーパーの好守","ベンチの采配"])}が光った。`+
+      `${draw?'勝点を分け合う結果に。':`一方の${ln}は次節での巻き返しを誓う。`}</p>`;
+    sections.push({kind:'lead',lab:'今節のトップ記事',title:draw?`激闘ドロー ── ${hn} ${ws}–${lsc} ${an}`:`${wn} ${pick(['快勝','勝利をつかむ','意地を見せる','勝点3を手に'])} ── ${ws}–${lsc}`,byline:npBy(),html:body});
+  } else {
+    sections.push({kind:'lead',lab:'今節',title:`第${wk}節を振り返る`,byline:npBy(),html:`<p>各地で熱戦が繰り広げられた第${wk}節。順位表は一層混戦の様相を呈している。</p>`});
+  }
+  sections.push({kind:'box',title:'順位表 TOP5',html:tbl.slice(0,5).map((c,i)=>`<span class="np-row"><span>${i+1}. ${c.name}${c.idx===G.user?' <span class="gold">★</span>':''}</span><span class="gold">${c.P}pt</span></span>`).join('')});
+  const {sc,ca}=npLeagueLeaders();
+  if(sc.length)sections.push({kind:'box',title:'得点ランキング',html:sc.map(x=>npPlayerLine(x,`${x.p.season.goals}G`)).join('')});
+  if(ca.length)sections.push({kind:'box',title:'スニッチ捕獲',html:ca.map(x=>npPlayerLine(x,`${x.p.season.catches}回`)).join('')});
+  if(wk>=4){const ar=awardRace();sections.push({kind:'box',title:'アワードレース（MVP予想）',html:ar.mvp.map(x=>npPlayerLine(x,`${overall(x.p)}`)).join('')+`<div class="tiny muted" style="margin-top:6px">最優秀OF: ${ar.off[0]?ar.off[0].p.name:'-'}／最優秀DF: ${ar.def[0]?ar.def[0].p.name:'-'}</div>`});}
+  sections.push(npColumn(tbl));
+  sections.push(npUserFocus());
+  const injs=allPlayers().filter(x=>x.p.inj>0).sort((a,b)=>b.p.inj-a.p.inj).slice(0,5);
+  if(injs.length)sections.push({kind:'article',lab:'メディカルリポート',title:'負傷者情報',byline:npBy(),html:injs.map(x=>`<p style="margin:4px 0">▪ ${x.p.name}（${G.clubs[x.club.idx].name}）── ${x.p.injType||'負傷'}、復帰まで約${x.p.inj}節。</p>`).join('')});
+  sections.push(npGossip());
+  pushIssue({season:G.seasonNo,wk,type:'weekly',sections});
 }
+function generateProphetPreseason(){
+  const pred=predictedTable();const sections=[];
+  const fav=pred[0],sec=pred[1];
+  sections.push({kind:'lead',lab:'シーズンプレビュー',title:`シーズン${G.seasonNo} 開幕 ── 優勝本命は${fav.name}`,byline:npBy(),html:
+    `<p>いよいよシーズン${G.seasonNo}が幕を開ける。本紙の戦力分析では、${fav.name}が優勝候補の筆頭に挙がった。`+
+    `${sec?`${sec.name}がこれに続き、`:''}上位争いは例年以上の混戦が予想される。</p>`+
+    `<p>各クラブはオフの成長と新戦力を擁し、戦術トレンドも多様化。今季も予測不能のドラマが待っているに違いない。</p>`});
+  sections.push({kind:'box',title:'順位予想',html:pred.map((c,i)=>`<span class="np-row"><span>${i+1}. ${c.name}${c.idx===G.user?' <span class="gold">★</span>':''}</span><span class="muted">戦力${Math.round(clubStrength(c))}</span></span>`).join('')});
+  sections.push({kind:'box',title:'優勝オッズ',html:pred.slice(0,5).map((c,i)=>`<span class="np-row"><span>${c.name}</span><span class="gold">${['2.5','4.0','6.0','9.0','13'][i]||'20'}倍</span></span>`).join('')});
+  const topByOvr=allPlayers().sort((a,b)=>overall(b.p)-overall(a.p));
+  const kFav=allPlayers().filter(x=>x.p.pos==='KE'||x.p.pos==='BE').sort((a,b)=>overall(b.p)-overall(a.p))[0];
+  const oFav=allPlayers().filter(x=>x.p.pos==='SE'||x.p.pos==='CH').sort((a,b)=>overall(b.p)-overall(a.p))[0];
+  sections.push({kind:'article',lab:'アワード予想',title:'今季のMVPは誰の手に',byline:npBy(),html:`<p>本紙が選ぶ開幕前MVP候補は、${topByOvr.slice(0,3).map(x=>x.p.name).join('、')}。いずれもリーグ屈指の実力者で、所属クラブの成績次第で評価は大きく動くだろう。</p>`+`<p>最優秀ディフェンス候補は${kFav?kFav.p.name:'-'}、最優秀オフェンス候補は${oFav?oFav.p.name:'-'}に注目だ。</p>`});
+  const young=leagueYoung(5);
+  if(young.length)sections.push({kind:'article',lab:'ネクストスター',title:'ブレイク必至の若手たち',byline:npBy(),html:`<p>今季の飛躍が期待される若き才能を紹介する。</p>`+young.map(x=>`<p style="margin:4px 0">▪ ${flag(x.p.nat)} <b>${x.p.name}</b>（${x.p.age}歳・${POS[x.p.pos].short}・${G.clubs[x.club.idx].name}）── 潜在能力${x.p.potential}。${pick(['化ければ主力級。','今季の台頭に期待。','スカウト陣も高評価。','大器の予感。'])}</p>`).join('')});
+  const pos=pred.findIndex(c=>c.idx===G.user)+1;
+  sections.push({kind:'article',lab:'クラブ展望',title:`${G.clubs[G.user].name} 今季の鍵`,byline:npBy(),html:`<p>本紙予想では<b>${pos}位</b>スタートと見られる${G.clubs[G.user].name}。${pick(['攻守のバランスが取れており、','若手の伸びしろが大きく、','経験豊富な選手層を擁し、'])}采配次第で上位進出も十分に可能だ。鍵を握るのは序盤戦の勢いだろう。</p>`});
+  sections.push(npGossip());
+  pushIssue({season:G.seasonNo,wk:0,type:'preseason',sections});
+}
+function generateProphetDraft(pool){
+  const top=pool.slice().sort((a,b)=>b.potential-a.potential);const sections=[];const n1=top[0];
+  sections.push({kind:'lead',lab:'ドラフト特集',title:`新人ドラフト展望 ── 全体1位は${n1?n1.name:'？'}か`,byline:npBy(),html:
+    `<p>シーズン${G.seasonNo}が終わり、注目の新人ドラフトが目前に迫った。本紙のスカウト網が捉えた逸材たちを紹介する。指名権は下位クラブが優先的に握る。</p>`+
+    (n1?`<p>最大の目玉は${flag(n1.nat)} <b>${n1.name}</b>（${n1.age}歳・${POS[n1.pos].name}）。潜在能力${n1.potential}は今ドラフト随一で、下位クラブが指名権を争うことになりそうだ。</p>`:'')});
+  sections.push({kind:'box',title:'上位指名予想',html:top.slice(0,6).map((p,i)=>`<span class="np-row"><span>${i+1}. ${p.name} <span class="muted" style="font-size:11px">${POS[p.pos].short}</span></span><span class="gold">POT ${p.potential}</span></span>`).join('')});
+  POS_ORDER.forEach(pos=>{const best=top.find(p=>p.pos===pos);if(best)sections.push({kind:'article',lab:POS[pos].name+'部門',title:`${POS[pos].name}の注目株: ${best.name}`,byline:npBy(),html:`<p>${flag(best.nat)} ${best.name}（${best.age}歳・OVR${overall(best)}／POT${best.potential}）。${pick(['即戦力に近い完成度を誇る。','荒削りだが将来性は抜群だ。','スピードと技術を兼ね備える。','大器の予感を漂わせる逸材。'])}${pick(['上位指名は確実とみられる。','化ければリーグを代表する選手に。','各クラブのスカウトが熱視線を送る。'])}</p>`});});
+  pushIssue({season:G.seasonNo,wk:0,type:'draft',sections});
+}
+
+const NP_CSS=`<style>
+.np-paper{border:1px solid var(--gold-soft);border-radius:14px;overflow:hidden;background:linear-gradient(180deg,rgba(230,185,79,.05),rgba(255,255,255,.01))}
+.np-mast{text-align:center;padding:16px 18px 10px;border-bottom:3px double var(--gold-soft)}
+.np-titl{font-family:Georgia,'Times New Roman',serif;font-size:32px;letter-spacing:.05em;font-weight:800;color:var(--ink);line-height:1.1}
+.np-sub{display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--line2);border-bottom:1px solid var(--line2);margin-top:9px;padding:5px 2px;font-size:10px;letter-spacing:.16em;color:var(--muted2);text-transform:uppercase}
+.np-body{padding:16px 18px}
+.np-lead .lab,.np-art .lab{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--aqua);font-weight:800}
+.np-lead h2{font-family:Georgia,serif;font-size:25px;line-height:1.25;margin:4px 0 4px;color:var(--ink)}
+.np-byline{font-size:10px;letter-spacing:.1em;color:var(--gold);text-transform:uppercase;margin:2px 0 8px}
+.np-lead .np-drop p{line-height:1.85;margin:8px 0}
+.np-lead .np-drop>p:first-child::first-letter{font-family:Georgia,serif;font-size:46px;float:left;line-height:.78;padding:4px 9px 0 0;color:var(--gold)}
+.np-boxes{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:16px 0}
+.np-box{border:1px solid var(--line2);border-radius:9px;padding:10px 12px;background:rgba(255,255,255,.02)}
+.np-box .bt{font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--gold);margin-bottom:7px;font-weight:800;border-bottom:1px solid var(--line);padding-bottom:5px}
+.np-row{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;padding:3px 0;border-bottom:1px dashed var(--line)}
+.np-cols{column-count:2;column-gap:24px}
+@media(max-width:680px){.np-cols{column-count:1}.np-titl{font-size:25px}}
+.np-art{break-inside:avoid;border-top:2px solid var(--line2);padding:12px 0 6px;margin-bottom:6px}
+.np-art h3{font-family:Georgia,serif;font-size:17px;margin:4px 0 5px;line-height:1.3;color:var(--ink)}
+.np-art p{line-height:1.7;font-size:13px;margin:6px 0;color:var(--ink)}
+.np-quote{font-family:Georgia,serif;font-style:italic;font-size:14px;color:var(--muted);border-left:3px solid var(--gold-soft);padding-left:12px;margin:10px 0}
+</style>`;
 function renderProphet(){
   const issues=G.prophet||[];
-  if(!issues.length)return `<p class="eyebrow">日刊預言者新聞 ・ クィディッチ欄</p><div class="card"><div class="card-b center muted" style="padding:28px">まだ記事がありません。試合（節）を進めると毎週の論評が掲載されます。</div></div>`;
-  const L=issues[0];
-  const masthead=`<div class="card" style="border-color:var(--gold-soft);background:linear-gradient(180deg,rgba(230,185,79,.06),transparent)"><div class="card-b">
-    <div style="text-align:center;border-bottom:2px solid var(--line2);padding-bottom:8px;margin-bottom:10px">
-      <div class="cz" style="font-size:23px;letter-spacing:.05em">日刊預言者新聞</div>
-      <div class="tiny muted">クィディッチ欄 ・ シーズン${L.season} 第${L.wk}節</div>
-    </div>
-    <h3 style="margin:0 0 8px">${L.headline}</h3>
-    ${L.items.map(it=>`<p style="margin:7px 0;line-height:1.75">▪ ${it}</p>`).join("")}
-  </div></div>`;
-  const past=issues.slice(1,8).map(is=>`<div class="card" style="margin-top:12px"><div class="card-h"><h3>S${is.season} 第${is.wk}節 ・ ${is.headline}</h3></div><div class="card-b">${is.items.map(it=>`<p class="tiny" style="margin:4px 0;line-height:1.6">▪ ${it}</p>`).join("")}</div></div>`).join("");
-  return `<p class="eyebrow">日刊預言者新聞 ・ クィディッチ欄</p>${masthead}${past}`;
+  if(!issues.length)return `<p class="eyebrow">日刊預言者新聞 ・ クィディッチ欄</p><div class="card"><div class="card-b center muted" style="padding:28px">まだ記事がありません。試合（節）を進めると、毎週の詳報・コラム・アワード予想などが掲載されます。</div></div>`;
+  const sel=clamp(G.prophetSel||0,0,issues.length-1);
+  const L=issues[sel];
+  const lead=L.sections.find(s=>s.kind==='lead');
+  const boxes=L.sections.filter(s=>s.kind==='box');
+  const arts=L.sections.filter(s=>s.kind==='article');
+  const dateline=L.type==='preseason'?'開幕前特別号':L.type==='draft'?'ドラフト特集号':`第${L.wk}節`;
+  const leadHtml=lead?`<div class="np-lead"><div class="lab">${lead.lab||'トップ記事'}</div><h2>${lead.title}</h2><div class="np-byline">本紙 ${lead.byline||npBy()} 記者</div><div class="np-drop">${lead.html}</div></div>`:'';
+  const boxHtml=boxes.length?`<div class="np-boxes">${boxes.map(b=>`<div class="np-box"><div class="bt">${b.title}</div>${b.html}</div>`).join('')}</div>`:'';
+  const artHtml=arts.length?`<div class="np-cols">${arts.map(a=>`<div class="np-art"><div class="lab">${a.lab||''}</div><h3>${a.title}</h3>${a.byline?`<div class="np-byline">本紙 ${a.byline} 記者</div>`:''}<div>${a.html}</div></div>`).join('')}</div>`:'';
+  const back=issues.map((is,i)=>`<button class="btn sm ${i===sel?'gold':'ghost'}" data-prophet="${i}">${is.type==='preseason'?'開幕前':is.type==='draft'?'ドラフト':'第'+is.wk+'節'} <span class="tiny muted">S${is.season}</span></button>`).join('');
+  return `${NP_CSS}<p class="eyebrow">日刊預言者新聞 ・ クィディッチ欄</p>
+  <div class="np-paper">
+    <div class="np-mast"><div class="np-titl">日刊預言者新聞</div>
+      <div class="np-sub"><span>クィディッチ欄</span><span>シーズン ${L.season} ・ ${dateline}</span><span>対価 5クヌート</span></div></div>
+    <div class="np-body">${leadHtml}${boxHtml}${artHtml}</div>
+  </div>
+  <div class="card" style="margin-top:14px"><div class="card-h"><h3>バックナンバー</h3><span class="tiny muted">${issues.length}号</span></div><div class="card-b"><div style="display:flex;flex-wrap:wrap;gap:6px">${back}</div></div></div>`;
 }
 
 /* ---- 新人ドラフト ---- */
@@ -2433,6 +2565,7 @@ function startDraft(){
   G.draft={order:seq,pick:0,pool,log:[],rounds:DRAFT_ROUNDS};
   G.phase='draft';G.view='draft';
   pushNews('🎓',`新人ドラフト開催（全${DRAFT_ROUNDS}巡 ・ ${seq.length}指名）。指名順は下位クラブ優先。`);
+  generateProphetDraft(pool);
   advanceDraft();
 }
 function draftRoundNo(){return Math.floor(G.draft.pick/G.clubs.length)+1;}
@@ -2562,7 +2695,7 @@ function renderMatch(){
    ACTION BINDING (event delegation on document)
 ============================================================ */
 document.addEventListener("click",e=>{
-  const t=e.target.closest("[data-view],[data-train],[data-style],[data-formation],[data-tempo],[data-press],[data-beater],[data-seeker],[data-sign],[data-release],[data-detail],[data-rankcat],[data-rankpos],[data-rankmetric],[data-loadslot],[data-delslot],[data-delok],[data-tpartner],[data-tgive],[data-tget],[data-tcash],[data-acceptoffer],[data-declineoffer],[data-fxfilter],[data-draft],#play,#poPlay,#autoLu,#scout,#nextSeason,#toDraft,#closeDetail,#saveFile,#loadBtn,#quickSave,#quickLoad,#continueSave,#openSlots,#slotsClose,#slotsBackdrop,#slotSaveNew,#delCancel,#sendTrade");
+  const t=e.target.closest("[data-view],[data-train],[data-style],[data-formation],[data-tempo],[data-press],[data-beater],[data-seeker],[data-sign],[data-release],[data-detail],[data-rankcat],[data-rankpos],[data-rankmetric],[data-loadslot],[data-delslot],[data-delok],[data-tpartner],[data-tgive],[data-tget],[data-tcash],[data-acceptoffer],[data-declineoffer],[data-fxfilter],[data-draft],[data-prophet],#play,#poPlay,#autoLu,#scout,#nextSeason,#toDraft,#closeDetail,#saveFile,#loadBtn,#quickSave,#quickLoad,#continueSave,#openSlots,#slotsClose,#slotsBackdrop,#slotSaveNew,#delCancel,#sendTrade");
   if(!t)return;
   if(t.dataset.tpartner){G.trade.partner=+t.dataset.tpartner;G.trade.get=[];render();return;}
   if(t.dataset.tgive){const id=+t.dataset.tgive;G.trade.give=G.trade.give.includes(id)?G.trade.give.filter(x=>x!==id):[...G.trade.give,id];render();return;}
@@ -2594,6 +2727,7 @@ document.addEventListener("click",e=>{
   if(t.id==="nextSeason"){newSeason();return;}
   if(t.id==="toDraft"){startDraft();return;}
   if(t.dataset.draft){draftPick(+t.dataset.draft);return;}
+  if(t.dataset.prophet){G.prophetSel=+t.dataset.prophet;G.view="prophet";render();return;}
   if(t.id==="closeDetail"){_detailId=null;render();return;}
   if(t.dataset.view){G.view=t.dataset.view;_detailId=null;render();return;}
   if(t.dataset.train){G.training=t.dataset.train;render();return;}
