@@ -1219,6 +1219,7 @@ function faWeekNo(){const fas=CALENDAR.map((c,i)=>({c,i})).filter(x=>x.c.type===
 /* 週送り（試合なしの週: バイ/コンバイン/FA） */
 function passWeek(){
   const c=calWeek();
+  if(c.type==='po'){poAdvanceWeek();return;} // プレーオフ週の「次の週へ」
   if(c.type==='bye'){
     applyTraining(G.clubs[G.user],G.training);injuryCheck();G.clubs.forEach(cl=>{if(cl.idx!==G.user)applyTraining(cl,'balanced');});
     G.offers=[];pushNews('🔒','トレードデッドライン（バイウィーク）を経過。今季のトレードは締め切られました。');
@@ -1420,31 +1421,44 @@ function enterPlayoffs(){
   const t=standings();const seeds=t.slice(0,8).map(c=>c.idx);
   G.po={seeds,stage:'QF',ties:[],results:{QF:[],SF:[],F:[]},championIdx:null,userSeries:null,finalStats:{}};
   buildStage('QF',[[seeds[0],seeds[7]],[seeds[3],seeds[4]],[seeds[1],seeds[6]],[seeds[2],seeds[5]]]);
+  const ut=G.po.ties.find(x=>x.a===G.user||x.b===G.user);
+  G.po.ties.forEach(x=>{if(x!==ut)autoCompleteTie(x);}); // 他会場は自動消化
+  G.po.userSeries=ut||null;
   G.phase='playoff';G.match=null;
   const inPo=seeds.includes(G.user);
   pushNews('🎯',`レギュラーシーズン終了。上位8チームがプレーオフへ進出。${inPo?'あなたのクラブも進出！':'あなたのクラブは進出を逃しました。'}`);
-  G.view='playoff';
-  processPlayoffStage();
-  autoSave();
-  render();
+  G.view='playoff';autoSave();render();
 }
-function processPlayoffStage(){
-  const ties=G.po.ties;
-  const userTie=ties.find(t=>t.a===G.user||t.b===G.user);
-  ties.forEach(t=>{if(t!==userTie)autoCompleteTie(t);});
-  if(userTie){G.po.userSeries=userTie;}
-  else{G.po.results[G.po.stage]=ties;nextStageOrEnd(ties.map(t=>t.winner));}
+/* 今週がユーザーの次戦か（第3戦不要週・敗退・不参加なら false） */
+function poUserGameDue(){
+  if(G.phase!=='playoff')return false;
+  const c=calWeek();if(c.type!=='po')return false;
+  const s=G.po&&G.po.userSeries;
+  if(!s||s.winner!==null)return false;
+  return s.games.length===c.game-1;
 }
-function nextStageOrEnd(winners){
-  if(G.po.stage==='QF'){buildStage('SF',[seedPair(winners[0],winners[1]),seedPair(winners[2],winners[3])]);processPlayoffStage();}
-  else if(G.po.stage==='SF'){buildStage('F',[seedPair(winners[0],winners[1])]);processPlayoffStage();}
-  else{G.po.championIdx=winners[0];endPlayoffs();}
+/* プレーオフの「次の週へ」/ 試合後の週送り */
+function poAdvanceWeek(){G.week++;poEnterWeek();}
+function poEnterWeek(){
+  const c=calWeek();
+  if(c.type!=='po'){poConclude();return;}      // プレーオフ期間終了 → 優勝確定
+  if(G.po.stage!==c.stage)poTransitionTo(c.stage); // 新ステージ到達 → 編成
+  G.view='playoff';autoSave();render();
 }
-function onUserSeriesDone(){
+function poTransitionTo(stage){
   G.po.results[G.po.stage]=G.po.ties;
   const winners=G.po.ties.map(t=>t.winner);
-  G.po.userSeries=null;
-  nextStageOrEnd(winners);
+  if(stage==='SF')buildStage('SF',[seedPair(winners[0],winners[1]),seedPair(winners[2],winners[3])]);
+  else if(stage==='F')buildStage('F',[seedPair(winners[0],winners[1])]);
+  const ut=G.po.ties.find(t=>t.a===G.user||t.b===G.user);
+  G.po.ties.forEach(t=>{if(t!==ut)autoCompleteTie(t);});
+  G.po.userSeries=(ut&&ut.winner===null)?ut:null;
+}
+function poConclude(){
+  G.po.results['F']=G.po.ties;
+  G.po.championIdx=G.po.ties[0].winner;
+  endPlayoffs();
+  render();
 }
 function startPlayoffMatch(){
   const s=G.po.userSeries;if(!s||s.winner!==null)return;
@@ -1471,16 +1485,7 @@ function finalizePlayoffGame(){
     pushNews(adv?'🎉':'🏳️',adv?`${stageName(G.po.stage)}突破！（シリーズ ${s.wa}-${s.wb}）`:`${stageName(G.po.stage)}敗退（シリーズ ${s.wa}-${s.wb}）`);
   }
   G.match=null;
-  if(s.winner!==null){
-    onUserSeriesDone();
-    // 次ステージに進んだらそのステージ第1戦の週へ。敗退/優勝ならseasonendへ（週は据え置き）
-    if(G.phase==='playoff'&&G.po&&G.po.userSeries){const sw=poStageStartWeek(G.po.stage);if(sw>=0)G.week=sw;}
-  } else {
-    G.week++; // 同ステージの次戦は翌週
-  }
-  if(G.phase!=='seasonend')G.view='playoff';
-  autoSave();
-  render();
+  poAdvanceWeek(); // 翌プレーオフ週へ（ステージ移行/優勝確定を処理）
 }
 function endPlayoffs(){
   pushNews('👑',`プレーオフ優勝は ${G.clubs[G.po.championIdx].name}！`);
@@ -1864,9 +1869,12 @@ function renderDashboard(){
       <p class="muted" style="margin-top:0">今週は試合がありません。選手はコンディションを回復します。</p>
       <button class="btn gold" id="nextWeek">次週へ ▶</button></div></div>`;
   } else if(c.type==='po'){
-    nextCard=`<div class="card"><div class="card-h"><h3>${calDate(c)} ・ プレーオフ</h3></div><div class="card-b center">
-      <p class="muted" style="margin-top:0">${stageName(c.stage)} 第${c.game}戦。トーナメントを進めましょう。</p>
-      <button class="btn gold" data-view="playoff">プレーオフへ ▶</button></div></div>`;
+    const due=poUserGameDue();const s=G.po&&G.po.userSeries;const inPo=G.po&&G.po.seeds.includes(G.user);
+    const line=due?'あなたの試合です。':(s&&s.winner===null)?'あなたのシリーズ進行中。':inPo?'あなたのシリーズは終了。他会場が進行中です。':'あなたはプレーオフに進出していません。';
+    nextCard=`<div class="card"><div class="card-h"><h3>${calDate(c)} ・ ${stageName(c.stage)} 第${c.game}戦</h3></div><div class="card-b center">
+      <p class="muted" style="margin-top:0">${line}</p>
+      <div class="btn-row" style="justify-content:center"><button class="btn" data-view="playoff">ブラケットを見る</button>
+      ${due?`<button class="btn gold" id="poPlay">試合へ ▶</button>`:`<button class="btn gold" id="nextWeek">次の週へ ▶</button>`}</div></div></div>`;
   } else if(c.type==='combine'){
     nextCard=`<div class="card" style="border-color:var(--gold-soft)"><div class="card-h"><h3>${calDate(c)} ・ ドラフトコンバイン</h3></div><div class="card-b center">
       <p class="muted" style="margin-top:0">来季の新人候補が能力を披露。最終評価が出そろいました。</p>
@@ -2380,15 +2388,26 @@ function renderPlayoffHub(){
   const po=G.po;const inPo=po.seeds.includes(G.user);
   const stages=[['QF','準々決勝'],['SF','準決勝'],['F','決勝']];
   let cta='';
-  if(po.userSeries&&po.userSeries.winner===null){
-    const s=po.userSeries;const g=s.games.length+1;
-    cta=`<div class="card" style="border-color:var(--gold);margin-bottom:16px"><div class="card-b" style="text-align:center">
-      <div class="eyebrow">${stageName(po.stage)} ・ 2勝先取 ・ 現在 ${s.wa}–${s.wb}</div>
-      <div style="font-size:17px;margin:6px 0 12px">第 ${g} 戦${s.wa===1&&s.wb===1?'（最終戦）':''}</div>
-      <div class="btn-row" style="justify-content:center">
-        <button class="btn" data-view="tactics">戦術を調整</button>
-        <button class="btn gold" id="poPlay">試合へ ▶</button>
-      </div></div></div>`;
+  const c=calWeek();
+  if(c.type==='po'&&po.championIdx==null){
+    if(poUserGameDue()){
+      const s=po.userSeries;const g=s.games.length+1;
+      cta=`<div class="card" style="border-color:var(--gold);margin-bottom:16px"><div class="card-b" style="text-align:center">
+        <div class="eyebrow">${calDate(c)} ・ ${stageName(po.stage)} ・ 2勝先取 ・ 現在 ${s.wa}–${s.wb}</div>
+        <div style="font-size:17px;margin:6px 0 12px">第 ${g} 戦${s.wa===1&&s.wb===1?'（最終戦）':''}</div>
+        <div class="btn-row" style="justify-content:center">
+          <button class="btn" data-view="tactics">戦術を調整</button>
+          <button class="btn gold" id="poPlay">試合へ ▶</button>
+        </div></div></div>`;
+    } else {
+      const s=po.userSeries;
+      const msg=(s&&s.winner!==null)?'あなたのシリーズは終了しました。':inPo?'今週あなたの試合はありません（第3戦不要 など）。':'あなたはプレーオフに進出していません。';
+      cta=`<div class="card" style="margin-bottom:16px"><div class="card-b" style="text-align:center">
+        <div class="eyebrow">${calDate(c)} ・ ${stageName(c.stage)} 第${c.game}戦</div>
+        <div class="muted" style="margin:6px 0 12px">${msg}他会場の結果を見ながら次の週へ進みましょう。</div>
+        <button class="btn gold" id="nextWeek">次の週へ ▶</button>
+      </div></div>`;
+    }
   }
   const cols=stages.map(([k,lbl])=>{
     const ties=(po.results[k]&&po.results[k].length)?po.results[k]:(k===po.stage?po.ties:[]);
