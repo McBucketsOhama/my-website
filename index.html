@@ -2392,10 +2392,64 @@ function renderAwardsFor(aw,history){
     <div class="card-b" style="padding:0"><table><tbody>${ftList||'<tr><td class="muted center" style="padding:20px">該当なし</td></tr>'}</tbody></table></div></div>
   ${histRows?`<div class="card" style="margin-top:16px"><div class="card-h"><h3>歴代受賞</h3></div><div class="card-b" style="padding:0"><table><thead><tr><th class="center">季</th><th>優勝</th><th>MVP</th><th>ファイナルMVP</th></tr></thead><tbody>${histRows}</tbody></table></div></div>`:''}`;
 }
+function awRaceRow(i,x,metric){
+  return `<div style="display:flex;align-items:center;gap:9px;padding:5px 2px;border-bottom:1px solid var(--line)">
+    <span style="width:16px;text-align:center;font-weight:800;color:${i===0?'var(--gold)':'var(--muted2)'}">${i+1}</span>
+    <span class="ovr ${ovrTier(overall(x.p))}">${overall(x.p)}</span>
+    <div style="flex:1;min-width:0"><div class="player-name">${flag(x.p.nat)} ${x.p.name}</div><div class="tiny muted">${POS[x.p.pos].name}・${G.clubs[x.club.idx].name}</div></div>
+    <span class="tiny gold" style="white-space:nowrap">${metric}</span>
+  </div>`;
+}
+function renderAwardsRace(){
+  const pool=allPlayers().filter(x=>x.p.season&&x.p.season.gp>0);
+  const tbl=standings();const rankOf={};tbl.forEach((c,i)=>rankOf[c.idx]=i);
+  const rb=x=>Math.max(0,(G.clubs.length-rankOf[x.club.idx])*0.8);
+  const mvp=pool.slice().sort((a,b)=>mvpScore(b.p,rb(b))-mvpScore(a.p,rb(a))).slice(0,5);
+  const off=pool.filter(x=>x.p.pos==="CH"||x.p.pos==="SE").sort((a,b)=>prodOff(b.p)-prodOff(a.p)).slice(0,5);
+  const def=pool.filter(x=>x.p.pos==="KE"||x.p.pos==="BE").sort((a,b)=>prodDef(b.p)-prodDef(a.p)).slice(0,5);
+  const byPos=pos=>pool.filter(x=>x.p.pos===pos);
+  const ft={CH:bestBy(byPos("CH"),prodOff,3),BE:bestBy(byPos("BE"),prodDef,2),KE:bestBy(byPos("KE"),prodDef,1),SE:bestBy(byPos("SE"),prodOff,1)};
+  const mvpMetric=x=>`${x.p.season.goals}G・捕${x.p.season.catches}`;
+  const offMetric=x=>x.p.pos==="SE"?`捕${x.p.season.catches}・${x.p.season.goals}G`:`${x.p.season.goals}G`;
+  const defMetric=x=>`OVR${overall(x.p)}・${x.p.season.gp}試合`;
+  const card=(title,ic,list,metricFn,note)=>`<div class="card"><div class="card-h"><h3>${ic} ${title}</h3><span class="tiny muted">暫定上位</span></div>
+    <div class="card-b" style="padding:8px 14px">${list.length?list.map((x,i)=>awRaceRow(i,x,metricFn(x))).join(""):'<div class="tiny muted" style="padding:10px">該当者なし</div>'}${note?`<div class="tiny muted" style="margin-top:6px">${note}</div>`:""}</div></div>`;
+  // ファイナルMVP（決勝開催中はその時点の貢献度上位、それ以外は決勝後）
+  const fs=(G.po&&G.po.finalStats)||{};
+  const fsKeys=Object.keys(fs);
+  let finalsHtml;
+  if(G.phase==="playoff"&&G.po&&G.po.stage==="F"&&fsKeys.length){
+    const arr=fsKeys.map(id=>{const p=findPlayerById(+id);if(!p)return null;const club=G.clubs.find(c=>c.squad.some(q=>q.id===p.id));return {p,club:club||{idx:p.club||0},s:fs[id]};}).filter(Boolean)
+      .sort((a,b)=>(b.s.goals*0.6+b.s.catches*8)-(a.s.goals*0.6+a.s.catches*8)).slice(0,5);
+    finalsHtml=`<div class="card"><div class="card-h"><h3>🏆 ファイナルMVP</h3><span class="tiny muted">決勝・暫定</span></div>
+      <div class="card-b" style="padding:8px 14px">${arr.map((x,i)=>awRaceRow(i,x,`${x.s.goals}G・捕${x.s.catches}`)).join("")||'<div class="tiny muted" style="padding:10px">集計中</div>'}</div></div>`;
+  } else {
+    finalsHtml=`<div class="card"><div class="card-h"><h3>🏆 ファイナルMVP</h3></div><div class="card-b"><p class="tiny muted" style="margin:6px 0">プレーオフ決勝シリーズ終了後に決定します。</p></div></div>`;
+  }
+  const ftCell=x=>`<div style="display:flex;align-items:center;gap:8px"><span class="ovr ${ovrTier(overall(x.p))}">${overall(x.p)}</span><div><div class="player-name">${flag(x.p.nat)} ${x.p.name}</div><div class="tiny muted">${G.clubs[x.club.idx].name}${(x.p.pos==="CH"||x.p.pos==="SE")?` ・ ${x.p.season.goals}G`:""}${x.p.season.catches?` ・ 捕${x.p.season.catches}`:""}</div></div></div>`;
+  const ftList=[...ft.CH,...ft.BE,...ft.KE,...ft.SE].map(x=>`<tr><td class="center"><span class="pos ${x.p.pos}">${POS[x.p.pos].short}</span></td><td>${ftCell(x)}</td></tr>`).join("");
+  const phaseNote=G.phase==="playoff"?"プレーオフ進行中":"レギュラーシーズン進行中";
+  return `<p class="eyebrow">年間アワード ・ ${phaseNote}（暫定ランキング）</p>
+  <p class="tiny muted" style="margin-top:-4px">シーズンが完全に終わるまでは、各賞の現時点での上位候補を表示します。最終結果はプレーオフ終了時に確定します。</p>
+  <div class="grid cols-2">
+    ${card("シーズンMVP","🏅",mvp,mvpMetric)}
+    ${finalsHtml}
+    ${card("最優秀オフェンス賞（CH・SE）","⚡",off,offMetric)}
+    ${card("最優秀ディフェンス賞（KE・BE）","🛡",def,defMetric)}
+  </div>
+  <div class="card" style="margin-top:16px"><div class="card-h"><h3>⭐ ファーストチーム（暫定）</h3><span class="tiny muted">CH×3・BE×2・KE・SE</span></div>
+    <div class="card-b" style="padding:0"><table><tbody>${ftList||'<tr><td class="muted center" style="padding:18px">該当なし</td></tr>'}</tbody></table></div></div>`;
+}
 function renderAwards(){
-  const aw=G.awards||((G.awardHistory&&G.awardHistory.length)?G.awardHistory[G.awardHistory.length-1]:null);
-  if(!aw)return `<p class="eyebrow">年間アワード</p><div class="card"><div class="card-b center muted" style="padding:28px">シーズン終了時にMVP・ファイナルMVP・オフェンス／ディフェンス最優秀・ファーストチームが発表されます。</div></div>`;
-  return renderAwardsFor(aw,G.awardHistory||[]);
+  // 確定済み（シーズン完全終了後）
+  if(G.awards)return renderAwardsFor(G.awards,G.awardHistory||[]);
+  // シーズン進行中：その時点の暫定ランキング
+  const played=allPlayers().some(x=>x.p.season&&x.p.season.gp>0);
+  if(played)return renderAwardsRace();
+  // 今季まだ試合なし
+  if(G.awardHistory&&G.awardHistory.length)
+    return `<div class="card" style="margin-bottom:14px;border-color:var(--gold-soft)"><div class="card-b tiny muted">今季はまだ試合が行われていません。下記は前シーズンの最終結果です。</div></div>`+renderAwardsFor(G.awardHistory[G.awardHistory.length-1],G.awardHistory);
+  return `<p class="eyebrow">年間アワード</p><div class="card"><div class="card-b center muted" style="padding:28px">シーズンが進むと、各アワード（MVP・ファイナルMVP・オフェンス／ディフェンス最優秀・ファーストチーム）の暫定ランキングがここに表示されます。</div></div>`;
 }
 
 /* ---- 日刊預言者新聞・クィディッチ欄 ---- */
