@@ -873,13 +873,13 @@ function newGame(userIdx,managerName){
   usedNames.clear();_pid=1;
   const clubs=TEAMS.map((t,i)=>({
     idx:i,name:t.name,str:t.str,squad:makeSquadFrom(t),
-    tactic:{style:"balanced",seeker:"smart",formation:"line",tempo:"normal",press:"normal",beater:"balanced"},
+    tactic:{style:"balanced",seeker:"balanced",formation:"line",tempo:"normal",press:"normal",beater:"balanced"},
     P:0,W:0,D:0,L:0,PF:0,PA:0,
   }));
   // AIクラブは個性的な戦術プロファイルを持ち、試合展開に差が出る
   clubs.forEach((c,i)=>{ if(i!==userIdx) c.tactic={
     style:    pick(["superatk","attack","balanced","balanced","defense"]),
-    seeker:   pick(["aggressive","smart","smart","late"]),
+    seeker:   pick(["hunt","balanced","balanced","mark"]),
     formation:pick(["arrow","line","line","diamond"]),
     tempo:    pick(["fast","normal","normal","slow"]),
     press:    pick(["high","normal","normal","low"]),
@@ -982,12 +982,19 @@ const BEATER={
   balanced:{label:"バランス", atk:1.00, def:1.00, disrupt:1.00},
   defense: {label:"守備固め", atk:0.96, def:1.08, disrupt:0.65},
 };
+/* シーカーの役割 ── 自分で捕りに行く(探索) か 相手シーカーを抑える(マーク) か。
+   ※スニッチを「勝てる状況で捕る」のは常に自動。役割は捕獲レースの優劣を左右する。 */
+const SEEKROLE={
+  hunt:    {label:"探索重視", self:1.14, markOpp:1.00},
+  balanced:{label:"バランス", self:1.00, markOpp:1.00},
+  mark:    {label:"マーク",   self:0.90, markOpp:0.80},
+};
 /* 戦術オブジェクトを正規化（旧セーブや欠損フィールドに耐える） */
 function tac(club){
   const t=(club&&club.tactic)||{};
   return {
     style:    STYLE[t.style]        ? t.style     : "balanced",
-    seeker:   t.seeker              || "smart",
+    seeker:   SEEKROLE[t.seeker]    ? t.seeker    : "balanced",
     formation:FORMATION[t.formation]? t.formation : "line",
     tempo:    TEMPO[t.tempo]        ? t.tempo     : "normal",
     press:    PRESS[t.press]        ? t.press     : "normal",
@@ -1004,7 +1011,7 @@ function ratings(club,lu){
   const def=((ke?ke.def:40)*.5 + avg(be,p=>p.def)*.3 + (avg(ch,p=>p.def)*fm.chDef)*.2)*s.def*bt.def*pr.def + avg(be,p=>p.att)*.06;
   const seek=se?(se.spd*.45+se.tec*.25+se.men*.3):40;
   return {atk,def,seek,se:se,ch,be,ke,
-    beat:avg(be,p=>p.att), sta:avg(P,p=>p.sta), tempo:tp, press:pr, beater:bt};
+    beat:avg(be,p=>p.att), sta:avg(P,p=>p.sta), tempo:tp, press:pr, beater:bt, role:SEEKROLE[T.seeker]};
 }
 function scoreProb(atk,def){return clamp(0.25+(atk-def)/120,0.05,0.74);}
 /* 終盤の消耗 ── テンポ/プレスで疲れ、体力(sta)が高いほど耐える */
@@ -1043,12 +1050,8 @@ function simulateMatch(home,away,homeLu,awayLu){
   const snap=(type,txt,ex)=>ev.push(Object.assign({min,type,txt,hs,as},ex||{}));
   snap("kick",`試合開始 ── ${home.name} 対 ${away.name}。`);
   const appear=ri(12,26);
-  const willing=(club,my,opp,since)=>{
-    const t=club.tactic.seeker;
-    if(t==="aggressive")return 1;
-    if(t==="late")return since<5?0.2:1;
-    return (my+150>opp)?1:0.18;
-  };
+  // スニッチは「捕れば勝てる（or 接戦を維持できる）」時にだけ本気で狙う ── 当然の判断として全シーカー共通
+  const willing=(my,opp)=>(my+150>opp)?1:0.18;
   for(let tick=1;tick<=92&&!caught;tick++){
     min+=ri(5,9);
     const prog=tick/92;
@@ -1069,9 +1072,12 @@ function simulateMatch(home,away,homeLu,awayLu){
     if(tick===appear)snap("snitch",`✨ スニッチ出現！ ${H.se?H.se.name:"?"} と ${A.se?A.se.name:"?"} が追い始める！`);
     if(tick>=appear){
       const since=tick-appear;
-      const wH=willing(home,hs,as,since),wA=willing(away,as,hs,since);
-      const effH=H.seek*wH,effA=A.seek*wA;
-      let pTick=clamp(0.07+0.028*since,0.04,0.7)*((H.seek+A.seek)/150);
+      // 役割を反映した実効シーカー能力（探索=自分↑ / マーク=相手↓）
+      const seekH=H.seek*H.role.self*A.role.markOpp;
+      const seekA=A.seek*A.role.self*H.role.markOpp;
+      const wH=willing(hs,as),wA=willing(as,hs);
+      const effH=seekH*wH,effA=seekA*wA;
+      let pTick=clamp(0.07+0.028*since,0.04,0.7)*((seekH+seekA)/150);
       if(effH+effA<=0.01)pTick=0.05;
       if(rng()<pTick){
         const eh=effH*effH, ea=effA*effA;
@@ -1081,7 +1087,7 @@ function simulateMatch(home,away,homeLu,awayLu){
       }
     }
   }
-  if(!caught){const hc=H.seek>=A.seek;if(hc){hs+=150;snap("catch",`🟡 ${H.se?H.se.name:"シーカー"} がついにスニッチ捕獲！`,{cid:H.se?H.se.id:null});}else{as+=150;snap("catch",`🟡 ${A.se?A.se.name:"シーカー"} がついにスニッチ捕獲！`,{cid:A.se?A.se.id:null});}}
+  if(!caught){const hc=(H.seek*H.role.self*A.role.markOpp)>=(A.seek*A.role.self*H.role.markOpp);if(hc){hs+=150;snap("catch",`🟡 ${H.se?H.se.name:"シーカー"} がついにスニッチ捕獲！`,{cid:H.se?H.se.id:null});}else{as+=150;snap("catch",`🟡 ${A.se?A.se.name:"シーカー"} がついにスニッチ捕獲！`,{cid:A.se?A.se.id:null});}}
   return {ev,hs,as,H,A};
 }
 
@@ -1827,12 +1833,8 @@ function renderTactics(){
       <div class="seg" style="margin:6px 0 16px">${Object.keys(PRESS).map(k=>`<button data-press="${k}" class="${T.press===k?'on':''}">${PRESS[k].label}</button>`).join("")}</div>
       <div class="eyebrow">ブラッジャー戦術</div>
       <div class="seg" style="margin:6px 0 16px">${Object.keys(BEATER).map(k=>`<button data-beater="${k}" class="${T.beater===k?'on':''}">${BEATER[k].label}</button>`).join("")}</div>
-      <div class="eyebrow">シーカーの指示</div>
-      <div class="seg" style="margin-top:6px">
-        <button data-seeker="aggressive" class="${T.seeker==='aggressive'?'on':''}">積極捕獲</button>
-        <button data-seeker="smart" class="${T.seeker==='smart'?'on':''}">状況判断</button>
-        <button data-seeker="late" class="${T.seeker==='late'?'on':''}">リード後に捕獲</button>
-      </div>
+      <div class="eyebrow">シーカーの役割</div>
+      <div class="seg" style="margin-top:6px">${Object.keys(SEEKROLE).map(k=>`<button data-seeker="${k}" class="${T.seeker===k?'on':''}">${SEEKROLE[k].label}</button>`).join("")}</div>
     </div></div>
     <div class="card"><div class="card-h"><h3>チーム評価値</h3></div><div class="card-b">
       ${ratingBar("攻撃力",r.atk,140)}
@@ -1843,7 +1845,8 @@ function renderTactics(){
         <b>テンポ</b>：高速ほど得点機会が増えるが終盤に消耗。<br>
         <b>プレッシング</b>：相手の攻撃を抑えるが体力を削る。<br>
         <b>ブラッジャー</b>：攻撃支援は相手の攻撃を寸断しやすく、守備固めは失点を抑える。<br>
-        <b>シーカー</b>：「積極」は早く、「状況判断」は勝てる時、「リード後」は加点を待ってから捕獲を狙う。
+        <b>シーカー</b>：「探索重視」は自軍の捕獲を優先、「マーク」は相手シーカーを抑えて捕獲を妨害（自軍はやや不利に）。<br>
+        <span class="muted">※スニッチは常に「勝てる状況」でのみ狙います（当然の判断として自動）。</span>
       </p>
       <p class="tiny muted" style="margin-top:8px">評価値は隊形・スタイル・ブラッジャー戦術とラインナップを反映します（テンポ／プレスは試合中に作用）。</p>
     </div></div>
