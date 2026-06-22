@@ -662,9 +662,9 @@ function avatarSVG(p,size,kit){
 ============================================================ */
 const POS={
   CH:{name:"チェイサー",short:"CH",count:3,w:{att:.32,tec:.24,spd:.20,sta:.12,men:.12}},
-  BE:{name:"ビーター", short:"BE",count:2,w:{att:.30,def:.30,spd:.15,men:.15,sta:.10}},
-  KE:{name:"キーパー", short:"KE",count:1,w:{def:.46,men:.20,tec:.18,spd:.16}},
-  SE:{name:"シーカー", short:"SE",count:1,w:{spd:.34,tec:.20,men:.20,att:.11,sta:.15}},
+  BE:{name:"ビーター", short:"BT",count:2,w:{att:.30,def:.30,spd:.15,men:.15,sta:.10}},
+  KE:{name:"キーパー", short:"GK",count:1,w:{def:.46,men:.20,tec:.18,spd:.16}},
+  SE:{name:"シーカー", short:"SK",count:1,w:{spd:.34,tec:.20,men:.20,att:.11,sta:.15}},
 };
 const POS_ORDER=["CH","BE","KE","SE"];
 const STAT_LABELS={att:"攻撃",def:"守備",spd:"速さ",tec:"技術",sta:"体力",men:"精神"};
@@ -2263,7 +2263,7 @@ function renderTactics(){
       <div class="card-b">
         ${pitchView(club,lu)}
         <div class="legend" style="margin-top:12px">
-          <span><i style="background:#e08d80"></i>CH</span><span><i style="background:#86b0e0"></i>BE</span><span><i style="background:#74cdbd"></i>KE</span><span><i style="background:var(--gold)"></i>SE</span>
+          <span><i style="background:#e08d80"></i>${POS.CH.short}</span><span><i style="background:#86b0e0"></i>${POS.BE.short}</span><span><i style="background:#74cdbd"></i>${POS.KE.short}</span><span><i style="background:var(--gold)"></i>${POS.SE.short}</span>
         </div>
       </div>
     </div>
@@ -2802,7 +2802,7 @@ function renderSearch(){
   const s=G.search;
   const nats=[...new Set(searchPool().map(x=>x.p.nat))].sort();
   const natOpts=`<option value="">全ての国籍</option>`+nats.map(n=>`<option value="${n}" ${s.nat===n?'selected':''}>${n}</option>`).join("");
-  const posBtns=[["","全位置"],["CH","CH"],["BE","BE"],["KE","KE"],["SE","SE"]].map(([k,l])=>`<button data-searchpos="${k}" class="${(s.pos||"")===k?'on':''}">${l}</button>`).join("");
+  const posBtns=[["","全位置"],["CH",POS.CH.short],["BE",POS.BE.short],["KE",POS.KE.short],["SE",POS.SE.short]].map(([k,l])=>`<button data-searchpos="${k}" class="${(s.pos||"")===k?'on':''}">${l}</button>`).join("");
   const ovrBtns=[[0,"指定なし"],[60,"60+"],[70,"70+"],[80,"80+"],[85,"85+"]].map(([v,l])=>`<button data-searchovr="${v}" class="${(s.minOvr||0)===v?'on':''}">${l}</button>`).join("");
   return `<p class="eyebrow">選手検索</p>
   <p class="tiny muted" style="margin-top:-4px">リーグ全選手とフリー選手を、名前・国籍・OVR・ポジションで検索します。</p>
@@ -2891,7 +2891,7 @@ function renderAwardsFor(aw,history){
     ${big('最優秀オフェンス賞',aw.offense,'⚡')}
     ${big('最優秀ディフェンス賞',aw.defense,'🛡')}
   </div>
-  <div class="card" style="margin-top:16px"><div class="card-h"><h3>⭐ オールリーグ・ファーストチーム</h3><span class="tiny muted">CH×3 ・ BE×2 ・ KE ・ SE</span></div>
+  <div class="card" style="margin-top:16px"><div class="card-h"><h3>⭐ オールリーグ・ファーストチーム</h3><span class="tiny muted">${POS.CH.short}×3 ・ ${POS.BE.short}×2 ・ ${POS.KE.short} ・ ${POS.SE.short}</span></div>
     <div class="card-b" style="padding:0"><table><tbody>${ftList||'<tr><td class="muted center" style="padding:20px">該当なし</td></tr>'}</tbody></table></div></div>
   ${histRows?`<div class="card" style="margin-top:16px"><div class="card-h"><h3>歴代受賞</h3></div><div class="card-b" style="padding:0"><table><thead><tr><th class="center">季</th><th>優勝</th><th>MVP</th><th>ファイナルMVP</th></tr></thead><tbody>${histRows}</tbody></table></div></div>`:''}`;
 }
@@ -2940,7 +2940,7 @@ function renderAwardsRace(){
     ${card("最優秀オフェンス賞（CH・SE）","⚡",off,offMetric)}
     ${card("最優秀ディフェンス賞（KE・BE）","🛡",def,defMetric)}
   </div>
-  <div class="card" style="margin-top:16px"><div class="card-h"><h3>⭐ ファーストチーム（暫定）</h3><span class="tiny muted">CH×3・BE×2・KE・SE</span></div>
+  <div class="card" style="margin-top:16px"><div class="card-h"><h3>⭐ ファーストチーム（暫定）</h3><span class="tiny muted">${POS.CH.short}×3・${POS.BE.short}×2・${POS.KE.short}・${POS.SE.short}</span></div>
     <div class="card-b" style="padding:0"><table><tbody>${ftList||'<tr><td class="muted center" style="padding:18px">該当なし</td></tr>'}</tbody></table></div></div>`;
 }
 function renderAwards(){
