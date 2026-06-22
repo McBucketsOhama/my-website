@@ -1150,6 +1150,20 @@ function weeklyDevelop(club,focus){
     const down = p.age>=33?0.06 : p.age>=30?0.03 : p.age>=28?0.01 : 0; // 高齢ほど衰えやすい
     if(rng()<up && overall(p)<p.potential){ks.forEach(k=>{if(p[k]<99)p[k]=clamp(p[k]+1,25,99);});}
     else if(rng()<down){ks.forEach(k=>{p[k]=clamp(p[k]-1,25,99);});}
+    // 若手はシーズン中でもOVR/ポテンシャルが大幅に変わることがある
+    if(p.age<=22 && rng()<0.012){
+      // 大化け（急成長）：ポテンシャルを上方修正し、OVRが一気に跳ねる
+      p.potential=clamp(p.potential+ri(2,6),overall(p),99);
+      const leap=ri(3,6);const b0=overall(p);
+      for(let i=0;i<leap;i++){if(overall(p)<p.potential)ks.forEach(k=>{if(p[k]<99)p[k]=clamp(p[k]+1,25,99);});}
+      if(overall(p)>b0&&club.idx===G.user)pushNews('🌟',`${p.name}（${p.age}歳）が急成長！ OVR ${b0}→${overall(p)}・POT ${p.potential}。`);
+    } else if(p.age<=23 && rng()<0.015){
+      // 評価の激変：スカウト評価でポテンシャルが上下に再評価される
+      const before=p.potential;
+      const d=rng()<0.55?ri(2,7):-ri(2,7);
+      p.potential=clamp(p.potential+d,Math.max(overall(p),38),99);
+      if(p.potential!==before&&club.idx===G.user)pushNews(p.potential>before?'📈':'📉',`${p.name}（${p.age}歳）の潜在能力評価が ${before}→${p.potential} に修正された。`);
+    }
     p.value=playerValue(p);
   });
 }
