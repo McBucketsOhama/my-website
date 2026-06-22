@@ -1296,6 +1296,16 @@ function accumulateStats(ev,homeLu,awayLu,homeClub,awayClub){
   });
 }
 
+/* 試合のボックススコア（得点者＋スニッチ捕獲者）。勝敗はスニッチ捕獲(+150)を含めて決まる前提を保持 */
+function boxScore(ev,hc,ac){
+  const find=id=>id==null?null:(getP(hc,id)||getP(ac,id));
+  const goals={};let snitch=null;
+  ev.forEach(e=>{
+    if(e.type==='goal'&&e.sid!=null){const p=find(e.sid);if(p){const club=getP(hc,e.sid)?hc.idx:ac.idx;const o=goals[e.sid]||(goals[e.sid]={name:p.name,pos:p.pos,club,n:0});o.n++;}}
+    if(e.type==='catch'&&e.cid!=null){const p=find(e.cid);if(p)snitch={name:p.name,pos:p.pos,club:(getP(hc,e.cid)?hc.idx:ac.idx)};}
+  });
+  return {scorers:Object.values(goals),snitch};
+}
 function finalizeRound(){
   const fx=currentFixtures();
   // user result
@@ -1307,15 +1317,15 @@ function finalizeRound(){
   const oppIdx=m.isHome?m.away:m.home;
   pushNews(meWon?"🏆":draw?"🤝":"💔",
     `第${G.round+1}節: ${G.clubs[m.home].name} ${m.hs} - ${m.as} ${G.clubs[m.away].name} （${meWon?"勝利":draw?"引分":"敗戦"}）`);
-  G.results[G.round]=[{h:m.home,a:m.away,hs:m.hs,as:m.as}];
-  // other matches
+  G.results[G.round]=[{h:m.home,a:m.away,hs:m.hs,as:m.as,box:boxScore(m.ev,G.clubs[m.home],G.clubs[m.away])}];
+  // other matches（CPU同士も完全シミュレーションし、詳細を保存）
   for(const [h,a] of fx){
     if(h===G.user||a===G.user)continue;
     const hl=bestLineup(G.clubs[h]), al=bestLineup(G.clubs[a]);
     const q=simulateMatch(G.clubs[h],G.clubs[a],hl,al);
     applyResult(h,a,q.hs,q.as);
     accumulateStats(q.ev,hl,al,G.clubs[h],G.clubs[a]);
-    G.results[G.round].push({h,a,hs:q.hs,as:q.as});
+    G.results[G.round].push({h,a,hs:q.hs,as:q.as,box:boxScore(q.ev,G.clubs[h],G.clubs[a])});
   }
   scoutProspects();
   generateProphet();
@@ -1883,6 +1893,7 @@ function render(){
     case "fixtures":body=renderFixtures();break;
     case "rankings":body=renderRankings();break;
     case "contracts":body=renderContracts();break;
+    case "rosters":body=renderRosters();break;
     case "search":body=renderSearch();break;
     case "prophet":body=renderProphet();break;
     case "awards":body=renderAwards();break;
@@ -1899,7 +1910,7 @@ function renderShell(body){
   const club=G.clubs[G.user];
   const table=standings();
   const myPos=table.findIndex(c=>c.idx===G.user)+1;
-  const navItems=[["dashboard","ダッシュボード"],["prophet","新聞"],["squad","スカッド"],["tactics","戦術"],["transfers","移籍市場"],["trade","トレード"],["search","選手検索"],["contracts","契約"],["table","順位表"],["rankings","ランキング"],["awards","アワード"],["prospects","新人候補"],["fixtures","日程"]];
+  const navItems=[["dashboard","ダッシュボード"],["prophet","新聞"],["squad","スカッド"],["tactics","戦術"],["transfers","移籍市場"],["trade","トレード"],["search","選手検索"],["contracts","契約"],["table","順位表"],["rosters","全クラブ"],["rankings","ランキング"],["awards","アワード"],["prospects","新人候補"],["fixtures","日程"]];
   if(G.phase==="draft")navItems.push(["draft","ドラフト"]);
   else if(G.phase!=="regular")navItems.push(["playoff","プレーオフ"]);
   app().innerHTML=`
@@ -2402,10 +2413,37 @@ function userOppForRound(round){
   const res=(G.results[round]||[]).find(x=>x.h===me[0]&&x.a===me[1]);
   return {opp,isHome,res};
 }
+/* ボックススコア（得点者＋スニッチ捕獲者）。勝敗はスニッチ捕獲(+150)込みで決まる前提 */
+function boxScoreHtml(r){
+  if(!r.box)return '<div class="tiny muted" style="padding:4px 12px 10px">詳細データがありません（旧データ）。</div>';
+  const sc=ci=>{const l=(r.box.scorers||[]).filter(s=>s.club===ci);return l.length?l.slice().sort((a,b)=>b.n-a.n).map(s=>`${s.name}${s.n>1?` ×${s.n}`:''}`).join('・'):'クアッフル得点なし';};
+  const sn=r.box.snitch;
+  const snWon=sn?(sn.club===r.h?r.hs>r.as:r.as>r.hs):false;
+  return `<div class="tiny" style="padding:4px 12px 10px;line-height:1.75;background:rgba(255,255,255,.02);border-radius:0 0 8px 8px">
+    <div><b>${G.clubs[r.h].name}</b> 得点者: ${sc(r.h)}</div>
+    <div><b>${G.clubs[r.a].name}</b> 得点者: ${sc(r.a)}</div>
+    ${sn?`<div class="gold" style="margin-top:3px">🟡 スニッチ捕獲（SE）: <b>${sn.name}</b>（${G.clubs[sn.club].name}）＋150点 ${snWon?'── 勝利を決定づけた':''}</div>`:''}
+  </div>`;
+}
+function roundResultsHtml(round,mineOnly){
+  const fx=G.schedule[round]||[];const played=G.results[round];
+  let list=fx;if(mineOnly)list=fx.filter(([hh,aa])=>hh===G.user||aa===G.user);
+  return list.map(([hh,aa])=>{
+    const r=played?played.find(x=>x.h===hh&&x.a===aa):null;
+    const me=hh===G.user||aa===G.user;
+    const key='r'+round+'-'+hh+'-'+aa;
+    const open=r&&G.resultOpen===key;
+    return `<div><div class="fixture" ${r?`data-result="${key}" style="cursor:pointer"`:''}>
+        <span class="h ${hh===G.user?'bold-me':''}">${G.clubs[hh].name}</span>
+        ${r?`<span class="res ${me?'gold':''}">${r.hs} - ${r.as} <span class="tiny muted">${open?'▲':'▾'}</span></span>`:`<span class="vs">vs</span>`}
+        <span class="a ${aa===G.user?'bold-me':''}">${G.clubs[aa].name}</span>
+      </div>${open?boxScoreHtml(r):''}</div>`;
+  }).join("");
+}
 function renderSeasonSchedule(){
   const rows=CALENDAR.map((c,i)=>{
     const cur=i===(G.week||0);
-    let detail='';
+    let detail='';const isPastMatch=c.type==='match'&&G.results[c.round];
     if(c.type==='match'){const u=userOppForRound(c.round);if(u){const r=u.res;const gf=r?(u.isHome?r.hs:r.as):null,ga=r?(u.isHome?r.as:r.hs):null;detail=`${u.isHome?'<span class="aqua">H</span>':'<span class="muted">A</span>'} vs ${u.opp.name} ${r?`<b class="${gf>ga?'gold':''}">${gf}–${ga}</b>`:''}`;}}
     else if(c.type==='bye')detail='<span class="aqua">バイウィーク ・ 🔒トレードデッドライン</span>';
     else if(c.type==='po')detail='プレーオフ';
@@ -2413,43 +2451,87 @@ function renderSeasonSchedule(){
     else if(c.type==='draft')detail='新人ドラフト';
     else if(c.type==='fa')detail='<span class="aqua">FA契約期間（取引可）</span>';
     else if(c.type==='preseason')detail='プレシーズン（親善）';
-    return `<div style="display:flex;gap:10px;align-items:center;padding:5px 10px;border-bottom:1px solid var(--line);${cur?'background:rgba(230,185,79,.10);border-left:3px solid var(--gold)':'border-left:3px solid transparent'}">
+    const open=isPastMatch&&G.schedOpen===c.round;
+    const row=`<div ${isPastMatch?`data-schedround="${c.round}" style="cursor:pointer;`:'style="'}display:flex;gap:10px;align-items:center;padding:5px 10px;border-bottom:1px solid var(--line);${cur?'background:rgba(230,185,79,.10);border-left:3px solid var(--gold)':'border-left:3px solid transparent'}">
       <span class="tiny" style="width:80px;color:${cur?'var(--gold)':'var(--muted2)'};font-weight:${cur?'800':'600'}">${c.m}月 第${c.w}週</span>
       <span class="tiny" style="width:104px;font-weight:700">${calEvent(c)}</span>
       <span class="tiny muted" style="flex:1;min-width:0">${detail}</span>
-      ${cur?'<span class="pill" style="color:var(--gold);border-color:var(--gold-soft)">今週</span>':''}
+      ${isPastMatch?`<span class="tiny gold">全結果 ${open?'▲':'▾'}</span>`:cur?'<span class="pill" style="color:var(--gold);border-color:var(--gold-soft)">今週</span>':''}
     </div>`;
+    return row + (open?`<div style="padding:6px 12px 8px">${roundResultsHtml(c.round,false)}</div>`:'');
   }).join('');
-  return `<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>シーズンスケジュール ・ シーズン${G.seasonNo}</h3><span class="tiny muted">10月開幕〜翌9月</span></div>
-    <div class="card-b" style="padding:0;max-height:520px;overflow-y:auto">${rows}</div></div>`;
+  return `<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>シーズンスケジュール ・ シーズン${G.seasonNo}</h3><span class="tiny muted">過去の週は「全結果」で全試合の詳細</span></div>
+    <div class="card-b" style="padding:0;max-height:560px;overflow-y:auto">${rows}</div></div>`;
 }
 function renderFixtures(){
   G.fxFilter=G.fxFilter||"all";
   const mineOnly=G.fxFilter==="mine";
   const cards=G.schedule.map((rd,ri2)=>{
     const played=G.results[ri2];
-    let rdFx=rd;
-    if(mineOnly)rdFx=rd.filter(([hh,aa])=>hh===G.user||aa===G.user);
+    let rdFx=rd;if(mineOnly)rdFx=rd.filter(([hh,aa])=>hh===G.user||aa===G.user);
     if(!rdFx.length)return "";
-    const fixtures=rdFx.map(([hh,aa])=>{
-      const r=played?played.find(x=>(x.h===hh&&x.a===aa)):null;
-      const me=hh===G.user||aa===G.user;
-      const hl=hh===G.user?'bold-me':'',al=aa===G.user?'bold-me':'';
-      return `<div class="fixture">
-        <span class="h ${hl}">${G.clubs[hh].name}</span>
-        ${r?`<span class="res ${me?'gold':''}">${r.hs} - ${r.as}</span>`:`<span class="vs">vs</span>`}
-        <span class="a ${al}">${G.clubs[aa].name}</span>
-      </div>`;
-    }).join("");
-    return `<div class="card" style="margin-bottom:12px"><div class="card-h"><h3>第 ${ri2+1} 節</h3>${ri2===G.round?'<span class="pill" style="color:var(--gold);border-color:var(--gold-soft)">今節</span>':played?'<span class="tiny muted">終了</span>':''}</div><div class="card-b" style="padding:8px 16px">${fixtures}</div></div>`;
+    return `<div class="card" style="margin-bottom:12px"><div class="card-h"><h3>第 ${ri2+1} 節</h3>${ri2===G.round&&G.phase==='regular'?'<span class="pill" style="color:var(--gold);border-color:var(--gold-soft)">今節</span>':played?'<span class="tiny muted">終了</span>':''}</div><div class="card-b" style="padding:8px 16px">${roundResultsHtml(ri2,mineOnly)}</div></div>`;
   }).join("");
   return `<p class="eyebrow">シーズン日程・結果</p>
    ${renderSeasonSchedule()}
-   <p class="eyebrow" style="margin-top:18px">節ごとの対戦・結果</p>
+   <p class="eyebrow" style="margin-top:18px">全試合の結果（節ごと ・ クリックで詳細）</p>
    <div class="seg" style="margin-bottom:12px">
      <button data-fxfilter="all" class="${G.fxFilter==='all'?'on':''}">全試合</button>
      <button data-fxfilter="mine" class="${G.fxFilter==='mine'?'on':''}">自クラブのみ</button>
    </div>${cards}`;
+}
+
+/* ---------- 全クラブ ロスター ---------- */
+function renderRosters(){
+  if(G.rosterClub==null)G.rosterClub=G.user;
+  const ci=G.rosterClub;const club=G.clubs[ci];
+  const tbl=standings();const rank=tbl.findIndex(c=>c.idx===ci)+1;
+  const picker=G.clubs.map(c=>`<button data-rosterclub="${c.idx}" class="${ci===c.idx?'on':''}">${c.name}${c.idx===G.user?' ★':''}</button>`).join('');
+  const groups=POS_ORDER.map(pos=>{
+    const ps=club.squad.filter(p=>p.pos===pos).sort((a,b)=>overall(b)-overall(a));
+    const rows=ps.map(p=>rosterRow(p,ci)).join('');
+    return `<div class="card" style="margin-bottom:12px"><div class="card-h"><h3><span class="pos ${pos}">${POS[pos].short}</span>&nbsp; ${POS[pos].name}</h3><span class="tiny muted">${ps.length}名</span></div><div class="card-b" style="padding:0"><table><thead><tr><th>OVR</th><th>選手</th><th class="center">年齢</th><th class="center">体力</th><th class="num">評価額</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  }).join('');
+  return `<p class="eyebrow">全クラブのロスター</p>
+   <p class="tiny muted" style="margin-top:-4px">クラブを選ぶと全選手を表示。選手をクリックすると詳細ステータスが開きます。</p>
+   <div class="seg" style="flex-wrap:wrap;margin-bottom:12px">${picker}</div>
+   <div class="card" style="margin-bottom:12px"><div class="card-h"><h3>${club.name}</h3><span class="tiny muted">${rank}位 ・ ${club.W}勝${club.D}分${club.L}敗 ・ ${club.squad.length}名</span></div><div class="card-b">${capBar(club)}</div></div>
+   ${groups}${rosterDetailCard(ci)}`;
+}
+function rosterRow(p,ci){
+  const o=overall(p);
+  return `<tr data-rosterdetail="${p.id}" style="cursor:pointer">
+    <td><span class="ovr ${ovrTier(o)}">${o}</span></td>
+    <td><div style="display:flex;align-items:center;gap:9px"><span class="ava">${avatarSVG(p,32,clubColors(ci))}</span><div><div class="player-name">${p.name} ${p.star?'<span class="gold">★</span>':''}${p.inj>0?' <span class="pill loss">負傷</span>':''}</div><div class="tiny muted">${POS[p.pos].name} ・ ${flag(p.nat)} ${p.nat} ・ ${p.age}歳${p.school?' ・ 🏰'+schoolObj(p.school).short:''}</div></div></div></td>
+    <td class="center">${p.age}</td>
+    <td class="center"><span class="${p.fitness>=80?'aqua':p.fitness>=55?'':'quaffle'}">${p.fitness}</span></td>
+    <td class="num">${gold(p.value)}</td>
+    <td class="num"><button class="btn sm ghost" data-rosterdetail="${p.id}">詳細</button></td>
+  </tr>`;
+}
+function rosterDetailCard(ci){
+  if(G.rosterDetailId==null)return '';
+  const club=G.clubs[ci];const p=getP(club,G.rosterDetailId);if(!p)return '';
+  const bars=["att","def","spd","tec","sta","men"].map(k=>{const v=p[k];const c=v>=80?'var(--gold)':v>=70?'var(--aqua)':v>=60?'var(--blue)':'var(--muted2)';return `<div class="statbar"><span class="lbl">${STAT_LABELS[k]}</span><div class="track"><div class="fill" style="width:${v}%;background:${c}"></div></div><span class="val">${v}</span></div>`;}).join('');
+  const o=overall(p);const s=p.school?schoolObj(p.school):null;
+  return `<div class="card" style="margin-top:4px;border-color:var(--gold-soft)"><div class="card-h"><h3>${flag(p.nat)} ${p.name} ${p.star?'<span class="gold">★</span>':''}</h3><button class="btn sm ghost" id="rosterClose">閉じる</button></div>
+   <div class="card-b"><div class="grid cols-2">
+    <div>
+      <div style="display:flex;gap:14px;align-items:center;margin-bottom:12px"><span class="ava">${avatarSVG(p,64,clubColors(ci))}</span><div class="ovr ${ovrTier(o)}" style="width:48px;height:48px;font-size:20px">${o}</div>
+        <div><div><span class="pos ${p.pos}">${POS[p.pos].short}</span> ${POS[p.pos].name}</div><div class="tiny muted">${club.name} ・ ${flag(p.nat)} ${p.nat} ・ ${p.age}歳 ・ POT ${p.potential}</div>${s?`<div class="tiny muted">🏰 ${s.name}（${s.place}）</div>`:''}</div></div>
+      ${bars}
+    </div>
+    <div>
+      <div class="eyebrow">コンディション</div>
+      <div class="statbar"><span class="lbl">体力</span><div class="track"><div class="fill" style="width:${p.fitness}%;background:var(--aqua)"></div></div><span class="val">${p.fitness}</span></div>
+      ${p.inj>0?`<div class="pill loss" style="margin-top:8px">負傷 ${p.inj}節（${p.injType||'負傷'}）</div>`:`<div class="pill win" style="margin-top:8px">出場可</div>`}
+      <div class="divider"></div>
+      <div class="eyebrow">今季成績</div>
+      <div class="tiny" style="margin-top:6px;line-height:1.8">出場 ${p.season?p.season.gp:0} 試合 ・ ${p.season?p.season.goals:0} ゴール ・ スニッチ捕獲 ${p.season?p.season.catches:0} 回</div>
+      <div class="divider"></div>
+      <div class="tiny muted">年俸 ${gold(p.salary||0)} ・ 残契約 ${p.years||1}年 ・ 評価額 ${gold(p.value)}</div>
+    </div>
+   </div></div></div>`;
 }
 
 /* ---------- PLAYOFF HUB ---------- */
@@ -3306,7 +3388,7 @@ function renderMatch(){
    ACTION BINDING (event delegation on document)
 ============================================================ */
 document.addEventListener("click",e=>{
-  const t=e.target.closest("[data-view],[data-train],[data-style],[data-formation],[data-tempo],[data-press],[data-beater],[data-seeker],[data-sign],[data-release],[data-detail],[data-rankcat],[data-rankpos],[data-rankmetric],[data-loadslot],[data-delslot],[data-delok],[data-tpartner],[data-tgive],[data-tget],[data-tcash],[data-acceptoffer],[data-declineoffer],[data-fxfilter],[data-draft],[data-prophet],[data-nparticle],[data-searchpos],[data-searchovr],#play,#poPlay,#playPre,#nextWeek,#toOffseason,#autoLu,#scout,#nextSeason,#toDraft,#closeDetail,#saveFile,#loadBtn,#quickSave,#quickLoad,#continueSave,#openSlots,#slotsClose,#slotsBackdrop,#slotSaveNew,#delCancel,#sendTrade");
+  const t=e.target.closest("[data-view],[data-train],[data-style],[data-formation],[data-tempo],[data-press],[data-beater],[data-seeker],[data-sign],[data-release],[data-detail],[data-rankcat],[data-rankpos],[data-rankmetric],[data-loadslot],[data-delslot],[data-delok],[data-tpartner],[data-tgive],[data-tget],[data-tcash],[data-acceptoffer],[data-declineoffer],[data-fxfilter],[data-draft],[data-prophet],[data-nparticle],[data-searchpos],[data-searchovr],[data-rosterclub],[data-rosterdetail],[data-result],[data-schedround],#rosterClose,#play,#poPlay,#playPre,#nextWeek,#toOffseason,#autoLu,#scout,#nextSeason,#toDraft,#closeDetail,#saveFile,#loadBtn,#quickSave,#quickLoad,#continueSave,#openSlots,#slotsClose,#slotsBackdrop,#slotSaveNew,#delCancel,#sendTrade");
   if(!t)return;
   if(t.dataset.tpartner){G.trade.partner=+t.dataset.tpartner;G.trade.get=[];render();return;}
   if(t.dataset.tgive){const id=+t.dataset.tgive;G.trade.give=G.trade.give.includes(id)?G.trade.give.filter(x=>x!==id):[...G.trade.give,id];render();return;}
@@ -3343,6 +3425,11 @@ document.addEventListener("click",e=>{
   if(t.dataset.draft){draftPick(+t.dataset.draft);return;}
   if(t.dataset.prophet){G.prophetSel=+t.dataset.prophet;G.npOpen=null;G.view="prophet";render();return;}
   if(t.dataset.nparticle!==undefined){const i=+t.dataset.nparticle;G.npOpen=(G.npOpen===i?null:i);render();return;}
+  if(t.dataset.rosterclub){G.rosterClub=+t.dataset.rosterclub;G.rosterDetailId=null;render();return;}
+  if(t.dataset.rosterdetail){G.rosterDetailId=+t.dataset.rosterdetail;render();return;}
+  if(t.id==="rosterClose"){G.rosterDetailId=null;render();return;}
+  if(t.dataset.result){G.resultOpen=(G.resultOpen===t.dataset.result?null:t.dataset.result);render();return;}
+  if(t.dataset.schedround){const rr=+t.dataset.schedround;G.schedOpen=(G.schedOpen===rr?null:rr);render();return;}
   if(t.dataset.searchpos!==undefined){G.search=G.search||{};G.search.pos=t.dataset.searchpos;render();return;}
   if(t.dataset.searchovr!==undefined){G.search=G.search||{};G.search.minOvr=+t.dataset.searchovr;render();return;}
   if(t.id==="closeDetail"){_detailId=null;render();return;}
