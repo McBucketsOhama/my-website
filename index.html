@@ -3111,17 +3111,37 @@ function npTradeReport(){
   body+=`<p><b>【噂】</b>${pick([`${a.name}が${b.name}の主力獲得に動いているとの情報を掴んだ。`,`${a.name}が手薄なポジションの補強を検討しているという。`,`${b.name}が若手とベテランの交換トレードを模索しているとささやかれる。`,`複数のクラブが${a.name}の控え選手に関心を示しているもようだ。`])}${dl}</p>`;
   return {kind:'article',lab:'移籍情報 ・ トレード',title:'トレード市場の最新事情',byline:npBy(),html:body};
 }
-/* ジニー・ウィーズリー記者: 今週の注目試合 */
-function npGinnyPickup(res,tbl){
-  if(!res||!res.length)return null;
+/* 試合の注目度（上位対決・番狂わせ・接戦・大勝・自軍戦を加味） */
+function gameNotability(m,rankOf,N){
+  const topness=(N-rankOf[m.h])+(N-rankOf[m.a]);
+  const margin=Math.abs(m.hs-m.as);
+  const winner=m.hs>m.as?m.h:m.as>m.hs?m.a:null;
+  let upset=0;
+  if(winner!=null){const loser=winner===m.h?m.a:m.h;if(rankOf[winner]>rankOf[loser])upset=rankOf[winner]-rankOf[loser];}
+  const close=Math.max(0,80-margin)/8;
+  const blowout=margin>=240?5:0;
+  const userBonus=(m.h===G.user||m.a===G.user)?4:0; // 自軍は軽い加点のみ。注目度が高い他試合が優先される
+  return topness*2.2+upset*4+close+blowout+userBonus;
+}
+function mostNotableGames(res,tbl){
   const rankOf={};tbl.forEach((c,i)=>rankOf[c.idx]=i);const N=G.clubs.length;
-  let best=null,score=-1;
-  res.forEach(m=>{
-    const margin=Math.abs(m.hs-m.as);
-    const topness=(N-rankOf[m.h])+(N-rankOf[m.a]);
-    const s=topness*3+Math.max(0,200-margin)/10+((m.h===G.user||m.a===G.user)?15:0);
-    if(s>score){score=s;best=m;}
-  });
+  return res.slice().map(m=>({m,s:gameNotability(m,rankOf,N)})).sort((a,b)=>b.s-a.s).map(x=>x.m);
+}
+function notabilityTag(m,tbl){
+  const rankOf={};tbl.forEach((c,i)=>rankOf[c.idx]=i);const rh=rankOf[m.h],ra=rankOf[m.a];const margin=Math.abs(m.hs-m.as);
+  const winner=m.hs>m.as?m.h:m.as>m.hs?m.a:null;
+  if(winner!=null&&rankOf[winner]>rankOf[winner===m.h?m.a:m.h]+3)return '番狂わせ';
+  if(rh<4&&ra<4)return '上位対決';
+  if(margin<=30)return '激闘';
+  if(margin>=240)return '圧勝劇';
+  if(m.h===G.user||m.a===G.user)return '注目の一戦';
+  return '今節のハイライト';
+}
+/* ジニー・ウィーズリー記者: 今週の注目試合（トップ記事とは別の試合を選ぶ） */
+function npGinnyPickup(res,tbl,exclude){
+  if(!res||!res.length)return null;
+  const ranked=mostNotableGames(res,tbl).filter(m=>m!==exclude);
+  const best=ranked[0];
   if(!best)return null;
   const hn=G.clubs[best.h].name,an=G.clubs[best.a].name;
   const hw=best.hs>best.as,draw=best.hs===best.as;const wn=hw?hn:an,ln=hw?an:hn;
@@ -3158,18 +3178,20 @@ function generateProphet(){
   const wk=G.round+1;const res=G.results[G.round]||[];
   const tbl=standings();
   const sections=[];
-  let lead=res.find(m=>m.h===G.user||m.a===G.user);
-  if(!lead){let big=null;res.forEach(m=>{const d=Math.abs(m.hs-m.as);if(!big||d>big.d)big=Object.assign({},m,{d});});lead=big;}
+  // その週で最も注目度の高い試合をトップ記事に（自軍戦に限らない）
+  let lead=mostNotableGames(res,tbl)[0]||null;
   if(lead){
+    const tag=notabilityTag(lead,tbl);
     const hn=G.clubs[lead.h].name,an=G.clubs[lead.a].name;const hw=lead.hs>lead.as;const wn=hw?hn:an,ln=hw?an:hn;
     const ws=Math.max(lead.hs,lead.as),lsc=Math.min(lead.hs,lead.as);const draw=lead.hs===lead.as;
     const verb=pick(["圧倒した","競り勝った","退けた","下した","振り切った"]);
-    const body=`<p>${hn} 対 ${an}の一戦は、${draw?`${ws}–${lsc}の激しい打ち合いとなった`:`${wn}が ${ws}–${lsc} で${ln}を${verb}`}。`+
+    const intro={'番狂わせ':'波乱が起きた。','上位対決':'今節最大の好カード、上位対決が実現した。','激闘':'まさにデスマッチと呼ぶにふさわしい激闘だった。','圧勝劇':'力の差を見せつける一方的な展開となった。','注目の一戦':'多くの視線が注がれた一戦――。','今節のハイライト':'今節を象徴する熱戦が生まれた。'}[tag]||'';
+    const body=`<p>${intro}${hn} 対 ${an}の一戦は、${draw?`${ws}–${lsc}の激しい打ち合いとなった`:`${wn}が ${ws}–${lsc} で${ln}を${verb}`}。`+
       `${(ws-lsc>=160)?'スニッチ捕獲が大勢を決し、':'クアッフルの応酬の末、'}スタンドのファンを大いに沸かせた。</p>`+
       `<p>${pick(["立ち上がりから主導権を握った","序盤は拮抗したが","劣勢を跳ね返した","終始安定した戦いを見せた"])}${draw?'両者':wn}は、`+
       `${pick(["チェイサー陣の連係","シーカーの集中力","ビーターの圧力","キーパーの好守","ベンチの采配"])}が光った。`+
       `${draw?'勝点を分け合う結果に。':`一方の${ln}は次節での巻き返しを誓う。`}</p>`;
-    sections.push({kind:'lead',lab:'今節のトップ記事',title:draw?`激闘ドロー ── ${hn} ${ws}–${lsc} ${an}`:`${wn} ${pick(['快勝','勝利をつかむ','意地を見せる','勝点3を手に'])} ── ${ws}–${lsc}`,byline:npBy(),html:body});
+    sections.push({kind:'lead',lab:`今節のトップ記事 ・ ${tag}`,title:draw?`${tag} ── ${hn} ${ws}–${lsc} ${an}`:`${tag}：${wn} ${pick(['快勝','勝利をつかむ','意地を見せる','勝点3を手に'])} ── ${ws}–${lsc}`,byline:npBy(),html:body});
   } else {
     sections.push({kind:'lead',lab:'今節',title:`第${wk}節を振り返る`,byline:npBy(),html:`<p>各地で熱戦が繰り広げられた第${wk}節。順位表は一層混戦の様相を呈している。</p>`});
   }
@@ -3180,7 +3202,7 @@ function generateProphet(){
   if(wk>=4){const ar=awardRace();sections.push({kind:'box',title:'アワードレース（MVP予想）',html:ar.mvp.map(x=>npPlayerLine(x,`${overall(x.p)}`)).join('')+`<div class="tiny muted" style="margin-top:6px">最優秀OF: ${ar.off[0]?ar.off[0].p.name:'-'}／最優秀DF: ${ar.def[0]?ar.def[0].p.name:'-'}</div>`});}
   sections.push(npColumn(tbl));
   sections.push(npAnalysis(tbl));
-  const gp=npGinnyPickup(res,tbl);if(gp)sections.push(gp);
+  const gp=npGinnyPickup(res,tbl,lead);if(gp)sections.push(gp);
   const gf=npGinnyFeature();if(gf)sections.push(gf);
   sections.push(npTradeReport());
   sections.push(npUserFocus());
