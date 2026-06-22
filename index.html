@@ -1036,24 +1036,117 @@ function staminaMul(R,prog){
   return clamp(1-drain,0.72,1.05);
 }
 
+/* ===== 実況（Play-by-Play）バリエーション ===== */
 const GOAL_LINES=[
-  "%P% が鮮やかなクアッフルゴール！",
-  "%P% がキーパーの逆を突いてシュート成功！",
-  "%P% の正確な投擲がゴールを射抜く！",
-  "速攻から %P% が決めた！",
-  "%P% がブラッジャーをかわしながら得点！",
+  "%P% が鮮やかにクアッフルを通した！ %C% 加点！",
+  "%P%、キーパーの逆を突くシュートが決まる！",
+  "%P% の正確無比な投擲がリングを射抜く！",
+  "速攻一閃、%P% が決め切った！ %C%！",
+  "%P% がブラッジャーをかわしながら左リングへ突き刺す！",
+  "%P% のロングシュートが美しく吸い込まれた！",
+  "華麗な連係から最後は %P%！ %C% ゴール！",
+  "%P% が中央を切り裂いてフィニッシュ！",
+  "%P%、ディフェンスを振り切って豪快に叩き込む！",
+  "%P% の冷静沈着なシュート、キーパーは一歩も動けず！",
+  "ワン・ツーから %P% が押し込んだ！",
+  "%P% がフェイントでキーパーを揺さぶり、無人のリングへ！",
+  "%P% のクイックリリース！ 反応する間も与えない！",
+  "%P%、混戦から抜け出してねじ込んだ！",
+  "%P% が右リング上段へ突き刺す！ 文句なし！",
+  "%P% のバックハンドショット！ これは技ありだ！",
+  "ディフェンスの裏へ抜けた %P%、落ち着いて流し込む！",
+  "%P% が距離をものともせず遠目から一撃！",
+  "%P% のシュートはリングを叩いて、そのまま吸い込まれた！",
+  "値千金のゴール！ %P% が決めた、%C%！",
+  "%P% が宙返りからのトリックショット！ 観客どよめく！",
+  "%P%、ターンしながらの離れ業！ ゴール！",
+  "ほうきを倒し込んだ %P% の超低空シュート！ 決まった！",
+  "%P% がノールックパスから合わせた！ 芸術的だ！",
 ];
 const SAVE_LINES=[
   "%K% がクアッフルを弾き返す好セーブ！",
-  "%K% が三本のゴールを死守！",
-  "惜しくも枠を外れる──%K% に阻まれた。",
+  "%K% が三本のリングを完璧に死守！",
+  "惜しくも枠を捉えきれず──%K% に阻まれた。",
+  "%K% の伸びてきた手がシュートを掻き出す！",
+  "決まったかと思われたが %K% が立ちはだかった！",
+  "%K%、ビッグセーブ！ 相手の決定機を摘み取る！",
+  "%K% が反応良くコースに入り、難なくキャッチ！",
+  "至近距離からのシュートを %K% が顔面で防ぐ！",
+  "%K% のポジショニングが冴える、シュートは正面へ。",
+  "%K%、片手一本で弾き出した！ 値千金のセーブだ！",
+  "%K% が飛び込んでクアッフルを抱え込む！",
+  "鋭いシュートも %K% の壁の前に沈黙。",
 ];
 const BEAT_LINES=[
-  "%B% のブラッジャーが相手チェイサーを直撃、流れが変わる。",
-  "%B% が巧みにブラッジャーを操り攻撃を寸断。",
+  "%B% のブラッジャーが相手チェイサーを直撃、%C% の攻撃が瓦解！",
+  "%B% が巧みにブラッジャーを操り、%C% の攻撃を寸断！",
+  "%B% の一撃が好機を潰す！ %C% は態勢を立て直せない。",
+  "強烈なブラッジャー！ %B% が %C% の前進を食い止めた！",
+  "%B% が狙い澄ましたブラッジャーで攻撃の芽を摘む！",
+  "%B%、コース上のブラッジャーで %C% のパスを乱す！",
+  "%B% のブラッジャーがクアッフルを叩き落とす！",
+  "%B% が二打連続のブラッジャー、%C% は防戦一方だ！",
+  "%B% の読みが的中、%C% の速攻を未然に断つ！",
+  "ピンポイントのブラッジャー！ %B% が流れを引き戻す！",
+  "%B% が相手エースを狙い撃ち、%C% の攻撃が停滞！",
+  "%B% のブラッジャーが宙を裂く、%C% たまらず後退！",
 ];
-
-function fillL(t,m){return t.replace("%P%",m.P||"").replace("%K%",m.K||"").replace("%B%",m.B||"");}
+const SNITCH_LINES=[
+  "✨ スニッチ出現！ %H% と %A% が一斉に追い始める！",
+  "✨ 金色の煌めき！ スニッチが姿を現した、シーカー両者が反応！",
+  "✨ ついにスニッチが出た！ %H% と %A%、運命の追走が始まる！",
+  "✨ スニッチ発見！ 150点を懸けた攻防の幕開けだ！",
+  "✨ スタンドがどよめく──スニッチが舞い上がった！",
+  "✨ %H% が真っ先に動いた！ スニッチを巡る駆け引きが熱を帯びる！",
+  "✨ スニッチ出現！ ここからは一瞬たりとも目が離せない！",
+  "✨ 黄金の翼が空を切る！ シーカー対決、いよいよ開幕！",
+];
+const CATCH_LINES=[
+  "🟡 %S% がスニッチ捕獲！ %C% に +150！",
+  "🟡 値千金の一閃！ %S% がスニッチを掴み取った！ %C%！",
+  "🟡 %S% が急降下からスニッチをひっ捕らえた！ +150！",
+  "🟡 渾身のダイブ！ %S% の手の中にスニッチが！ %C%！",
+  "🟡 %S%、相手シーカーを振り切ってキャッチ！ +150点！",
+  "🟡 一瞬の隙を突いた！ %S% がスニッチ捕獲、%C% に栄光の150点！",
+  "🟡 %S% の集中力が実を結ぶ、スニッチ確保！ %C%！",
+  "🟡 ついに決着！ %S% がスニッチを捉えた！ %C%！",
+  "🟡 観衆総立ち！ %S% の指先がスニッチを捉えた！",
+  "🟡 %S% が紙一重の競り合いを制してキャッチ！ +150！",
+  "🟡 鮮やかなフェイントから %S% がスニッチを奪取！ %C%！",
+  "🟡 %S%、長い追走の末にスニッチを掴んだ！ %C% に +150！",
+];
+const KICK_LINES=[
+  "試合開始 ── %C% 対 %O%。笛が鳴った！",
+  "キックオフ！ %C% と %O%、熱戦の予感だ。",
+  "両軍ピッチイン── %C% 対 %O%、いざ開始！",
+  "%C% 対 %O%、満員のスタンドが見守る中、試合開始！",
+  "ホイッスル！ %C% 対 %O% の一戦が幕を開ける。",
+  "選手たちが宙へ舞い上がる── %C% 対 %O%、開幕だ！",
+];
+function cmFill(t,o){return t.replace(/%P%/g,o.P||"").replace(/%K%/g,o.K||"").replace(/%B%/g,o.B||"").replace(/%S%/g,o.S||"").replace(/%C%/g,o.C||"").replace(/%O%/g,o.O||"").replace(/%H%/g,o.H||"").replace(/%A%/g,o.A||"");}
+function cmGoalTxt(name,club,diff,prog){
+  let t=cmFill(pick(GOAL_LINES),{P:name||"選手",C:club});
+  if(rng()<0.5){
+    let c=null;
+    if(prog>0.82)c=pick(["終盤の貴重な10点だ！","時間が迫る中での大きな得点！"]);
+    else if(diff===0)c=pick(["これで同点に追いついた！","試合は振り出しに戻った。"]);
+    else if(diff>0&&diff<=20)c=pick([`${club} がついにリードを奪う！`,"流れが大きく傾いた！"]);
+    else if(diff<0&&diff>=-20)c=pick([`${club}、1ゴール差に詰め寄る！`,"食らいついていく！"]);
+    else if(diff>=60)c=pick([`${club} がリードを広げる。`,"突き放しにかかる！"]);
+    else if(diff<=-60)c=pick(["それでも点差は大きい。","反撃の狼煙となるか。"]);
+    if(c)t+=" "+c;
+  }
+  return t;
+}
+function cmCatchTxt(name,club,myAfter,oppAfter){
+  let t=cmFill(pick(CATCH_LINES),{S:name||"シーカー",C:club});
+  const lead=myAfter-oppAfter;let c;
+  if(lead>0&&lead<=150)c=pick(["この一瞬で勝負を決定づけた！","土壇場のキャッチが試合をひっくり返した！","劇的な幕切れだ！"]);
+  else if(lead>150)c=pick(["勝利を確固たるものにした。","これで大勢は決した。"]);
+  else c=pick(["だが点差は覆らず…痛恨だ。","試合終了、しかし及ばなかった。","捕獲も、勝利には届かなかった。"]);
+  if(rng()<0.75)t+=" "+c;
+  return t;
+}
 </script>
 <script>
 function simulateMatch(home,away,homeLu,awayLu){
@@ -1062,7 +1155,7 @@ function simulateMatch(home,away,homeLu,awayLu){
   let hs=0,as=0,min=0,caught=false;
   const ev=[];
   const snap=(type,txt,ex)=>ev.push(Object.assign({min,type,txt,hs,as},ex||{}));
-  snap("kick",`試合開始 ── ${home.name} 対 ${away.name}。`);
+  snap("kick",cmFill(pick(KICK_LINES),{C:home.name,O:away.name}));
   const appear=ri(12,26);
   // スニッチは「捕れば勝てる（or 接戦を維持できる）」時にだけ本気で狙う ── 当然の判断として全シーカー共通
   const willing=(my,opp)=>(my+150>opp)?1:0.18;
@@ -1075,15 +1168,15 @@ function simulateMatch(home,away,homeLu,awayLu){
     const aDis=A.be.length&&rng()<0.12*A.beater.disrupt*clamp(A.beat/70,0.5,1.5);
     const hDis=H.be.length&&rng()<0.12*H.beater.disrupt*clamp(H.beat/70,0.5,1.5);
     // ホーム攻撃（テンポで機会増、相手プレスとブラッジャーで抑制）
-    if(rng()<scoreProb(H.atk*H.tempo.chance*A.press.oppAtk*(aDis?0.40:1),aDef)){hs+=10;const s=H.ch.length?pick(H.ch):null;snap("goal",`${s?s.name:"選手"} のクアッフルゴール！ ${home.name} 加点。`,{sid:s?s.id:null});}
-    else if(rng()<0.16&&A.ke){snap("save",`${A.ke.name} が好セーブで枠を死守。`);}
+    if(rng()<scoreProb(H.atk*H.tempo.chance*A.press.oppAtk*(aDis?0.40:1),aDef)){hs+=10;const s=H.ch.length?pick(H.ch):null;snap("goal",cmGoalTxt(s?s.name:null,home.name,hs-as,prog),{sid:s?s.id:null});}
+    else if(rng()<0.16&&A.ke){snap("save",cmFill(pick(SAVE_LINES),{K:A.ke.name}));}
     // アウェイ攻撃
-    if(rng()<scoreProb(A.atk*A.tempo.chance*H.press.oppAtk*(hDis?0.40:1),hDef)){as+=10;const s=A.ch.length?pick(A.ch):null;snap("goal",`${s?s.name:"選手"} のクアッフルゴール！ ${away.name} 加点。`,{sid:s?s.id:null});}
-    else if(rng()<0.16&&H.ke){snap("save",`${H.ke.name} が好セーブ。`);}
+    if(rng()<scoreProb(A.atk*A.tempo.chance*H.press.oppAtk*(hDis?0.40:1),hDef)){as+=10;const s=A.ch.length?pick(A.ch):null;snap("goal",cmGoalTxt(s?s.name:null,away.name,as-hs,prog),{sid:s?s.id:null});}
+    else if(rng()<0.16&&H.ke){snap("save",cmFill(pick(SAVE_LINES),{K:H.ke.name}));}
     // 攻撃を寸断した側を実況
-    if(aDis)snap("beat",`${nm(A.be)} のブラッジャーが ${home.name} の攻撃を寸断！`);
-    else if(hDis)snap("beat",`${nm(H.be)} のブラッジャーが ${away.name} の攻撃を寸断！`);
-    if(tick===appear)snap("snitch",`✨ スニッチ出現！ ${H.se?H.se.name:"?"} と ${A.se?A.se.name:"?"} が追い始める！`);
+    if(aDis)snap("beat",cmFill(pick(BEAT_LINES),{B:nm(A.be),C:home.name}));
+    else if(hDis)snap("beat",cmFill(pick(BEAT_LINES),{B:nm(H.be),C:away.name}));
+    if(tick===appear)snap("snitch",cmFill(pick(SNITCH_LINES),{H:H.se?H.se.name:"?",A:A.se?A.se.name:"?"}));
     if(tick>=appear){
       const since=tick-appear;
       // 役割を反映した実効シーカー能力（探索=自分↑ / マーク=相手↓）
@@ -1096,12 +1189,12 @@ function simulateMatch(home,away,homeLu,awayLu){
       if(rng()<pTick){
         const eh=effH*effH, ea=effA*effA;
         const homeCatch=rng()<(eh/Math.max(0.0001,eh+ea));
-        if(homeCatch){hs+=150;caught=true;snap("catch",`🟡 ${H.se?H.se.name:"シーカー"} がスニッチ捕獲！ ${home.name} に +150！`,{cid:H.se?H.se.id:null});}
-        else{as+=150;caught=true;snap("catch",`🟡 ${A.se?A.se.name:"シーカー"} がスニッチ捕獲！ ${away.name} に +150！`,{cid:A.se?A.se.id:null});}
+        if(homeCatch){hs+=150;caught=true;snap("catch",cmCatchTxt(H.se?H.se.name:null,home.name,hs,as),{cid:H.se?H.se.id:null});}
+        else{as+=150;caught=true;snap("catch",cmCatchTxt(A.se?A.se.name:null,away.name,as,hs),{cid:A.se?A.se.id:null});}
       }
     }
   }
-  if(!caught){const hc=(H.seek*H.role.self*A.role.markOpp)>=(A.seek*A.role.self*H.role.markOpp);if(hc){hs+=150;snap("catch",`🟡 ${H.se?H.se.name:"シーカー"} がついにスニッチ捕獲！`,{cid:H.se?H.se.id:null});}else{as+=150;snap("catch",`🟡 ${A.se?A.se.name:"シーカー"} がついにスニッチ捕獲！`,{cid:A.se?A.se.id:null});}}
+  if(!caught){const hc=(H.seek*H.role.self*A.role.markOpp)>=(A.seek*A.role.self*H.role.markOpp);if(hc){hs+=150;snap("catch",cmCatchTxt(H.se?H.se.name:null,home.name,hs,as),{cid:H.se?H.se.id:null});}else{as+=150;snap("catch",cmCatchTxt(A.se?A.se.name:null,away.name,as,hs),{cid:A.se?A.se.id:null});}}
   return {ev,hs,as,H,A};
 }
 
