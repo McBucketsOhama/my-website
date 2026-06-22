@@ -2196,7 +2196,7 @@ function renderTrade(){
   const tOpen=tradeOpen();
   const deadlineBanner=tOpen
     ? `<div class="card" style="margin-bottom:12px;border-color:var(--gold-soft)"><div class="card-b tiny"><span class="gold">●</span> トレード受付中 ・ デッドライン <b>${dl}（バイウィーク）</b>${G.phase==='offseason'?' ・ <span class="aqua">オフシーズン取引可</span>':''}</div></div>`
-    : `<div class="card" style="margin-bottom:12px;border-color:#5a3631"><div class="card-b tiny" style="color:var(--quaffle)">🔒 トレード期間外（デッドライン経過 または プレーオフ中）。次の取引可能期間はオフシーズンです。</div></div>`;
+    : `<div class="card" style="margin-bottom:12px;border-color:#5a3631"><div class="card-b tiny" style="color:var(--quaffle)">🔒 トレード期間外。デッドライン（バイウィーク）経過後はシーズン終了まで取引できません。トレードは<b>シーズン終了後（オフシーズン）から再開</b>します。</div></div>`;
   // incoming offers
   let offersHTML="";
   if(G.offers.length){
