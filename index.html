@@ -1724,22 +1724,45 @@ function sendTradeOffer(){
   const reasons=tradeReasons(pi,tr.give,tr.get,tr.cash);
   if(reasons.length){flash(reasons[0]);return;}
   const prob=tradeAcceptProb(pi,tr.give,tr.get,tr.cash);
+  const outNames=tr.give.map(id=>{const p=getP(G.clubs[G.user],id);return p?p.name:null;}).filter(Boolean);
+  const inNames=tr.get.map(id=>{const p=getP(G.clubs[pi],id);return p?p.name:null;}).filter(Boolean);
   if(rng()*100<prob){
     executeTrade(pi,tr.give,tr.get,tr.cash);
     G.trade={partner:pi,give:[],get:[],cash:0};
-    showTradeResult(true,prob,G.clubs[pi].name);
+    showTradeResult(true,prob,G.clubs[pi].name,outNames,inNames,tr.cash);
   }else{
     pushNews("🚫",`${G.clubs[pi].name} はトレードオファーを拒否しました（成立確率 ${prob}%）。`);
-    showTradeResult(false,prob,G.clubs[pi].name);
+    showTradeResult(false,prob,G.clubs[pi].name,outNames,inNames,tr.cash);
   }
   render();
 }
-/* トレード結果のビジュアル表示（成立=緑／拒否=赤） */
-let _tradeResult=null,_trTimer=null;
-function showTradeResult(ok,prob,partnerName){
-  _tradeResult={ok,prob,partner:partnerName};
-  if(_trTimer)clearTimeout(_trTimer);
-  _trTimer=setTimeout(()=>{_tradeResult=null;if(G&&G.view==='trade')render();},4000);
+/* トレード結果のリザルト画面（モーダル） */
+let _tradeResult=null;
+function showTradeResult(ok,prob,partnerName,out,inn,cash){
+  _tradeResult={ok,prob,partner:partnerName,out:out||[],inn:inn||[],cash:cash||0};
+}
+function tradeResultModal(){
+  const r=_tradeResult;if(!r)return '';
+  const ac=r.ok?'var(--aqua)':'var(--quaffle)';
+  const grad=r.ok?'linear-gradient(180deg,rgba(116,205,189,.22),transparent)':'linear-gradient(180deg,rgba(196,77,69,.20),transparent)';
+  const body=r.ok
+    ? `<div style="margin:6px 0 10px">
+         <div class="np-row" style="border:0;padding:5px 0"><span class="tiny muted">放出 →</span><span style="font-weight:700">${r.out.length?r.out.join('・'):'—'}</span></div>
+         <div class="np-row" style="border:0;padding:5px 0"><span class="tiny muted">獲得 ←</span><span class="gold" style="font-weight:800">${r.inn.length?r.inn.join('・'):'—'}</span></div>
+         ${r.cash?`<div class="np-row" style="border:0;padding:5px 0"><span class="tiny muted">上乗せ</span><span>${gold(r.cash)}</span></div>`:''}
+       </div>`
+    : `<p class="muted" style="margin:8px 0 12px;line-height:1.7">${r.partner} はオファーを拒否しました。提示価値・キャッシュ・相手の事情を見直して再提案しましょう。</p>`;
+  return `<div id="trModalBg" style="position:fixed;inset:0;background:rgba(8,12,20,.74);display:flex;align-items:center;justify-content:center;z-index:300;padding:20px;animation:npfade .18s ease">
+    <div style="max-width:430px;width:100%;border-radius:16px;border:2px solid ${ac};background:var(--panel,#141b29);box-shadow:0 24px 70px rgba(0,0,0,.55);overflow:hidden">
+      <div style="text-align:center;padding:24px 20px 12px;background:${grad}">
+        <div style="font-size:54px;line-height:1">${r.ok?'🤝':'🚫'}</div>
+        <div style="font-size:25px;font-weight:900;color:${ac};margin-top:6px">${r.ok?'トレード成立！':'交渉決裂'}</div>
+        <div class="tiny muted" style="margin-top:5px">相手: ${r.partner}${r.prob!=null?` ・ 成立確率 ${r.prob}%`:''}</div>
+      </div>
+      <div style="padding:8px 20px 4px">${body}</div>
+      <div style="padding:6px 20px 20px;text-align:center"><button class="btn ${r.ok?'gold':''}" id="trModalClose" style="min-width:150px">OK</button></div>
+    </div>
+  </div>`;
 }
 /* AI -> user incoming offers */
 function maybeGenerateOffer(){
@@ -1784,7 +1807,7 @@ function acceptOffer(oid){
   pushNews("🤝",`オファー受諾: ${give.name}${o.cash?` ＋${gold(o.cash)}`:""} を獲得、${want.name} を放出（${partner.name}）。`);
   G.offers=G.offers.filter(x=>x.id!==oid);
   logTrade(me.name,partner.name,give.name,POS[give.pos].short,want.name,POS[want.pos].short);
-  showTradeResult(true,null,partner.name);
+  showTradeResult(true,null,partner.name,[want.name],[give.name],o.cash);
   render();
 }
 function declineOffer(oid){G.offers=(G.offers||[]).filter(x=>x.id!==oid);pushNews("🙅","トレードオファーを辞退しました。");render();}
@@ -2031,7 +2054,7 @@ function renderShell(body){
   <div class="wrap" style="padding-top:18px">
     ${_flash?`<div class="card" style="border-color:var(--gold-soft);margin-bottom:14px"><div class="card-b" style="padding:12px 16px;color:var(--gold)">${_flash}</div></div>`:""}
     ${body}
-  </div>`;
+  </div>${tradeResultModal()}`;
   bindCommon();
 }
 function bindCommon(){
@@ -2370,13 +2393,7 @@ function renderTrade(){
   const deadlineBanner=tOpen
     ? `<div class="card" style="margin-bottom:12px;border-color:var(--gold-soft)"><div class="card-b tiny"><span class="gold">●</span> トレード受付中 ・ デッドライン <b>${dl}（バイウィーク）</b>${G.phase==='offseason'?' ・ <span class="aqua">オフシーズン取引可</span>':''}</div></div>`
     : `<div class="card" style="margin-bottom:12px;border-color:#5a3631"><div class="card-b tiny" style="color:var(--quaffle)">🔒 トレード期間外。デッドライン（バイウィーク）経過後はシーズン終了まで取引できません。トレードは<b>シーズン終了後（オフシーズン）から再開</b>します。</div></div>`;
-  const trBanner=_tradeResult
-    ? `<div class="card" style="margin-bottom:12px;border-color:${_tradeResult.ok?'var(--aqua)':'#5a3631'};background:${_tradeResult.ok?'rgba(116,205,189,.10)':'rgba(196,77,69,.10)'}"><div class="card-b" style="text-align:center;padding:18px">
-        <div style="font-size:36px">${_tradeResult.ok?'🤝✅':'🚫❌'}</div>
-        <div style="font-size:19px;font-weight:800;color:${_tradeResult.ok?'var(--aqua)':'var(--quaffle)'};margin-top:4px">${_tradeResult.ok?'トレード成立！':'オファーは拒否されました'}</div>
-        <div class="tiny muted" style="margin-top:4px">相手: ${_tradeResult.partner}${_tradeResult.prob!=null?` ・ 成立確率 ${_tradeResult.prob}%`:''}</div>
-      </div></div>`
-    : '';
+  const trBanner=''; // 結果はリザルト画面（モーダル）で表示
   // incoming offers
   let offersHTML="";
   if(G.offers.length){
@@ -3556,7 +3573,7 @@ function renderMatch(){
    ACTION BINDING (event delegation on document)
 ============================================================ */
 document.addEventListener("click",e=>{
-  const t=e.target.closest("[data-view],[data-train],[data-style],[data-formation],[data-tempo],[data-press],[data-beater],[data-seeker],[data-sign],[data-release],[data-detail],[data-rankcat],[data-rankpos],[data-rankmetric],[data-loadslot],[data-delslot],[data-delok],[data-tpartner],[data-tgive],[data-tget],[data-tcash],[data-acceptoffer],[data-declineoffer],[data-fxfilter],[data-draft],[data-prophet],[data-nparticle],#npBack,#npBack2,[data-searchpos],[data-searchovr],[data-rosterclub],[data-rosterdetail],[data-result],[data-schedround],#rosterClose,#play,#poPlay,#playPre,#nextWeek,#toOffseason,#autoLu,#scout,#nextSeason,#toDraft,#closeDetail,#saveFile,#loadBtn,#quickSave,#quickLoad,#wipeSave,#continueSave,#openSlots,#slotsClose,#slotsBackdrop,#slotSaveNew,#delCancel,#sendTrade");
+  const t=e.target.closest("[data-view],[data-train],[data-style],[data-formation],[data-tempo],[data-press],[data-beater],[data-seeker],[data-sign],[data-release],[data-detail],[data-rankcat],[data-rankpos],[data-rankmetric],[data-loadslot],[data-delslot],[data-delok],[data-tpartner],[data-tgive],[data-tget],[data-tcash],[data-acceptoffer],[data-declineoffer],[data-fxfilter],[data-draft],[data-prophet],[data-nparticle],#npBack,#npBack2,#trModalClose,#trModalBg,[data-searchpos],[data-searchovr],[data-rosterclub],[data-rosterdetail],[data-result],[data-schedround],#rosterClose,#play,#poPlay,#playPre,#nextWeek,#toOffseason,#autoLu,#scout,#nextSeason,#toDraft,#closeDetail,#saveFile,#loadBtn,#quickSave,#quickLoad,#wipeSave,#continueSave,#openSlots,#slotsClose,#slotsBackdrop,#slotSaveNew,#delCancel,#sendTrade");
   if(!t)return;
   if(t.dataset.tpartner){G.trade.partner=+t.dataset.tpartner;G.trade.get=[];render();return;}
   if(t.dataset.tgive){const id=+t.dataset.tgive;G.trade.give=G.trade.give.includes(id)?G.trade.give.filter(x=>x!==id):[...G.trade.give,id];render();return;}
@@ -3595,6 +3612,7 @@ document.addEventListener("click",e=>{
   if(t.dataset.prophet){G.prophetSel=+t.dataset.prophet;G.npArticle=null;G.view="prophet";render();return;}
   if(t.dataset.nparticle!==undefined){G.npArticle=+t.dataset.nparticle;render();return;}
   if(t.id==="npBack"||t.id==="npBack2"){G.npArticle=null;render();return;}
+  if(t.id==="trModalClose"||t.id==="trModalBg"){_tradeResult=null;render();return;}
   if(t.dataset.rosterclub){G.rosterClub=+t.dataset.rosterclub;G.rosterDetailId=null;render();return;}
   if(t.dataset.rosterdetail){G.rosterDetailId=+t.dataset.rosterdetail;render();return;}
   if(t.id==="rosterClose"){G.rosterDetailId=null;render();return;}
