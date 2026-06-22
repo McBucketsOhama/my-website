@@ -839,15 +839,20 @@ function sumSalary(ids,club){return ids.reduce((s,id)=>{const p=getP(club,id);re
 function sumValue(ids,club){return ids.reduce((s,id)=>{const p=getP(club,id);return s+(p?playerValue(p):0);},0);}
 function ovrTier(o){return o>=88?"t1":o>=80?"t2":o>=72?"t3":o>=63?"t4":"t5";}
 
+/* 開幕時の戦力差を圧縮（平均へ寄せる）。COMPRESSを小さくするほど均衡 */
+const STR_MEAN=TEAMS.reduce((s,t)=>s+t.str,0)/TEAMS.length;
+const STR_COMPRESS=0.4;
+function balancedStr(str){return Math.round(STR_MEAN+(str-STR_MEAN)*STR_COMPRESS);}
 function makeSquadFrom(team){
   const sq=[];
   const counts={CH:0,BE:0,KE:0,SE:0};
+  const bs=balancedStr(team.str);
   (team.roster||[]).forEach(r=>{
-    sq.push(makePlayer(r.pos,team.str,{name:r.name,nat:r.nat,bonus:ri(3,12)}));
+    sq.push(makePlayer(r.pos,bs,{name:r.name,nat:r.nat,bonus:ri(2,8)}));
     counts[r.pos]++;
   });
   for(const pos in PLAN){
-    while(counts[pos]<PLAN[pos]){sq.push(makePlayer(pos,team.str));counts[pos]++;}
+    while(counts[pos]<PLAN[pos]){sq.push(makePlayer(pos,bs));counts[pos]++;}
   }
   return sq;
 }
@@ -1413,6 +1418,19 @@ function offseasonDevelop(club){
   });
   return notes;
 }
+/* 引退：高齢ほど引退確率が上がる。ポジション最低人数は維持 */
+function retirePlayers(club){
+  const retired=[];
+  club.squad.slice().forEach(p=>{
+    let pr = p.age>=40?0.95 : p.age>=38?0.6 : p.age>=36?0.35 : p.age>=34?0.15 : p.age>=33?0.06 : 0;
+    if(pr>0&&overall(p)<60)pr+=0.15; // 衰えた選手はさらに引退しやすい
+    if(pr<=0||rng()>=pr)return;
+    if(club.squad.filter(x=>x.pos===p.pos).length<=POS[p.pos].count)return; // 最低人数は割らない
+    club.squad=club.squad.filter(x=>x.id!==p.id);
+    retired.push(p);
+  });
+  return retired;
+}
 function trimRoster(club){
   while(club.squad.length>ROSTER_MAX){
     const cand=club.squad.filter(p=>club.squad.filter(x=>x.pos===p.pos).length>POS[p.pos].count);
@@ -1437,6 +1455,8 @@ function newSeason(){
   G.clubs.forEach(c=>{
     c.P=c.W=c.D=c.L=c.PF=c.PA=0;
     c.squad.forEach(p=>{p.age++;p.season={gp:0,goals:0,catches:0};p.fitness=100;p.inj=0;p.injType=null;}); // オフは長期休養で全快
+    const retired=retirePlayers(c);
+    if(c.idx===G.user)retired.forEach(p=>pushNews('🎓',`${p.name}（${p.age}歳・${POS[p.pos].short}・OVR${overall(p)}）が現役を引退しました。長年の貢献に感謝。`));
     const notes=offseasonDevelop(c);if(c.idx===G.user)myNotes.push(...notes);
     c.squad.forEach(p=>{p.years=(p.years||1)-1;if(p.years<=0){p.years=ri(1,3);p.salary=contractSalary(p);if(c.idx===G.user)renewals++;}});
     if(c.idx!==G.user){trimRoster(c);aiCapCompliance(c);} // AIはキャップ内に自動調整
@@ -1707,12 +1727,19 @@ function sendTradeOffer(){
   if(rng()*100<prob){
     executeTrade(pi,tr.give,tr.get,tr.cash);
     G.trade={partner:pi,give:[],get:[],cash:0};
-    flash("トレード成立！");
+    showTradeResult(true,prob,G.clubs[pi].name);
   }else{
     pushNews("🚫",`${G.clubs[pi].name} はトレードオファーを拒否しました（成立確率 ${prob}%）。`);
-    flash(`オファーは拒否されました（${prob}%）。`);
+    showTradeResult(false,prob,G.clubs[pi].name);
   }
   render();
+}
+/* トレード結果のビジュアル表示（成立=緑／拒否=赤） */
+let _tradeResult=null,_trTimer=null;
+function showTradeResult(ok,prob,partnerName){
+  _tradeResult={ok,prob,partner:partnerName};
+  if(_trTimer)clearTimeout(_trTimer);
+  _trTimer=setTimeout(()=>{_tradeResult=null;if(G&&G.view==='trade')render();},4000);
 }
 /* AI -> user incoming offers */
 function maybeGenerateOffer(){
@@ -1757,6 +1784,7 @@ function acceptOffer(oid){
   pushNews("🤝",`オファー受諾: ${give.name}${o.cash?` ＋${gold(o.cash)}`:""} を獲得、${want.name} を放出（${partner.name}）。`);
   G.offers=G.offers.filter(x=>x.id!==oid);
   logTrade(me.name,partner.name,give.name,POS[give.pos].short,want.name,POS[want.pos].short);
+  showTradeResult(true,null,partner.name);
   render();
 }
 function declineOffer(oid){G.offers=(G.offers||[]).filter(x=>x.id!==oid);pushNews("🙅","トレードオファーを辞退しました。");render();}
@@ -2342,6 +2370,13 @@ function renderTrade(){
   const deadlineBanner=tOpen
     ? `<div class="card" style="margin-bottom:12px;border-color:var(--gold-soft)"><div class="card-b tiny"><span class="gold">●</span> トレード受付中 ・ デッドライン <b>${dl}（バイウィーク）</b>${G.phase==='offseason'?' ・ <span class="aqua">オフシーズン取引可</span>':''}</div></div>`
     : `<div class="card" style="margin-bottom:12px;border-color:#5a3631"><div class="card-b tiny" style="color:var(--quaffle)">🔒 トレード期間外。デッドライン（バイウィーク）経過後はシーズン終了まで取引できません。トレードは<b>シーズン終了後（オフシーズン）から再開</b>します。</div></div>`;
+  const trBanner=_tradeResult
+    ? `<div class="card" style="margin-bottom:12px;border-color:${_tradeResult.ok?'var(--aqua)':'#5a3631'};background:${_tradeResult.ok?'rgba(116,205,189,.10)':'rgba(196,77,69,.10)'}"><div class="card-b" style="text-align:center;padding:18px">
+        <div style="font-size:36px">${_tradeResult.ok?'🤝✅':'🚫❌'}</div>
+        <div style="font-size:19px;font-weight:800;color:${_tradeResult.ok?'var(--aqua)':'var(--quaffle)'};margin-top:4px">${_tradeResult.ok?'トレード成立！':'オファーは拒否されました'}</div>
+        <div class="tiny muted" style="margin-top:4px">相手: ${_tradeResult.partner}${_tradeResult.prob!=null?` ・ 成立確率 ${_tradeResult.prob}%`:''}</div>
+      </div></div>`
+    : '';
   // incoming offers
   let offersHTML="";
   if(G.offers.length){
@@ -2359,7 +2394,7 @@ function renderTrade(){
   // partner picker
   const picker=`<div class="seg" style="flex-wrap:wrap;margin-bottom:12px">${partners.map(c=>`<button data-tpartner="${c.idx}" class="${tr.partner===c.idx?'on':''}">${c.name}</button>`).join("")}</div>`;
   if(tr.partner==null){
-    return `<p class="eyebrow">トレード</p>${deadlineBanner}${offersHTML}
+    return `<p class="eyebrow">トレード</p>${trBanner}${deadlineBanner}${offersHTML}
       <div class="card"><div class="card-b">${capBar(me)}</div></div>
       <p class="muted" style="margin:14px 0 8px">トレード相手のクラブを選択してください。</p>${picker}`;
   }
@@ -2381,7 +2416,7 @@ function renderTrade(){
       <span class="ovr ${ovrTier(overall(p))}">${overall(p)}</span></button>`;
   }).join("");
   const probColor=prob>=66?'aqua':prob>=33?'gold':'quaffle';
-  return `<p class="eyebrow">トレード</p>${deadlineBanner}${offersHTML}
+  return `<p class="eyebrow">トレード</p>${trBanner}${deadlineBanner}${offersHTML}
    ${picker}
    <div class="grid cols-2" style="gap:14px">
      <div class="card"><div class="card-h"><h3>放出（${me.name}）</h3></div><div class="card-b" style="padding:8px"><div class="trade-list">${list(me,me.squad,tr.give,"tgive")}</div></div></div>
@@ -2969,7 +3004,8 @@ function npColumn(tbl){
       `<p>次のオフシーズン、移籍市場とドラフトでの動き次第では、一気に浮上する余地も残されている。問われているのは目先の結果より、フロントの長期的なビジョンと我慢強さだろう。</p>`},
   ];
   const c=pick(topics);
-  return {kind:'article',lab:c.lab,title:c.t,byline:npBy(),html:c.b+npQuote()};
+  const extra=`<p>${pick(['順位表の数字は、ピッチ上の無数のドラマの結晶だ。','長いシーズンを戦い抜くのは、選手だけではない。フロント、スタッフ、そしてファン――クラブに関わるすべての者の物語がそこにある。','一試合の勝敗が、時にシーズン全体の流れを変える。だからこそ、私たちは一戦一戦から目を離せない。','戦力、戦術、運。勝利に必要な要素は数多い。だが最後にものを言うのは、勝利への執念ではないだろうか。'])}${pick(['本紙は今後もリーグの最前線を追い続ける。','読者諸君と共に、このシーズンの行方を見届けたい。','次節以降の戦いから、ますます目が離せなくなりそうだ。'])}</p>`;
+  return {kind:'article',lab:c.lab,title:c.t,byline:npBy(),html:c.b+extra+npQuote()};
 }
 /* 2本目の分析コラム（データ視点） */
 function npAnalysis(tbl){
@@ -3201,47 +3237,65 @@ const NP_CSS=`<style>
 .np-row{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;padding:3px 0;border-bottom:1px dashed var(--line)}
 .np-cols{column-count:2;column-gap:24px}
 @media(max-width:680px){.np-cols{column-count:1}.np-titl{font-size:25px}}
-.np-art{border-top:2px solid var(--line2);padding:11px 0 8px;margin-bottom:2px}
-.np-art h3{font-family:Georgia,serif;font-size:17px;margin:4px 0 5px;line-height:1.3;color:var(--ink);display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.np-art{break-inside:avoid;border-top:2px solid var(--line2);padding:12px 0 10px;margin-bottom:6px}
+.np-art h3{font-family:Georgia,serif;font-size:17px;margin:4px 0 5px;line-height:1.3;color:var(--ink)}
 .np-art p{line-height:1.7;font-size:13px;margin:6px 0;color:var(--ink)}
-.np-quote{font-family:Georgia,serif;font-style:italic;font-size:14px;color:var(--muted);border-left:3px solid var(--gold-soft);padding-left:12px;margin:10px 0}
-.np-head{cursor:pointer}
-.np-head:hover h3{color:var(--gold)}
-.np-toggle{flex:0 0 auto;color:var(--gold);font-weight:800;font-size:18px;line-height:1}
-.np-teaser{font-size:12px;color:var(--muted);margin:4px 0 0}
-.np-full{margin-top:6px;border-top:1px dashed var(--line);padding-top:6px;animation:npfade .2s ease}
+.np-quote{font-family:Georgia,serif;font-style:italic;font-size:14px;color:var(--muted);border-left:3px solid var(--gold-soft);padding-left:12px;margin:12px 0}
+.np-clk{cursor:pointer;transition:opacity .15s}
+.np-clk:hover{opacity:.9}
+.np-clk:hover h3{color:var(--gold)}
+.np-teaser{font-size:12.5px;color:var(--muted);margin:5px 0 5px;line-height:1.65}
+.np-more{font-size:11px;color:var(--gold);font-weight:800;letter-spacing:.04em}
+.np-article{padding:18px 20px}
+.np-arttitle{font-family:Georgia,serif;font-size:26px;line-height:1.25;margin:4px 0 6px;color:var(--ink)}
+.np-article .np-drop p{line-height:1.95;font-size:14.5px;margin:12px 0;color:var(--ink)}
+.np-article .np-drop>p:first-child::first-letter{font-family:Georgia,serif;font-size:52px;float:left;line-height:.78;padding:4px 10px 0 0;color:var(--gold)}
 @keyframes npfade{from{opacity:0}to{opacity:1}}
 </style>`;
+function npDateline(L){return L.type==='preseason'?'開幕前特別号':L.type==='draft'?'ドラフト特集号':L.type==='playoff'?'プレーオフ特集号':L.type==='champion'?'優勝特集号 ・ 号外':`第${L.wk}節`;}
+function prophetArticlePage(L,idx){
+  const arts=L.sections.filter(s=>s.kind==='article');
+  const a=arts[idx];if(!a)return renderProphet();
+  return `${NP_CSS}<p class="eyebrow">日刊預言者新聞 ・ 記事</p>
+  <button class="btn sm" id="npBack" style="margin-bottom:10px">← 紙面に戻る</button>
+  <div class="np-paper">
+    <div class="np-mast" style="padding:12px 18px 8px"><div class="np-titl" style="font-size:22px">日刊預言者新聞</div>
+      <div class="np-sub"><span>${a.lab||'記事'}</span><span>シーズン ${L.season} ・ ${npDateline(L)}</span><span>対価 5クヌート</span></div></div>
+    <div class="np-body np-article">
+      <div class="lab">${a.lab||''}</div>
+      <h2 class="np-arttitle">${a.title}</h2>
+      <div class="np-byline">本紙 ${a.byline||'記者'} 記者</div>
+      <div class="np-drop">${a.html}</div>
+    </div>
+  </div>
+  <button class="btn" id="npBack2" style="margin-top:12px">← 紙面に戻る</button>`;
+}
 function renderProphet(){
   const issues=G.prophet||[];
   if(!issues.length)return `<p class="eyebrow">日刊預言者新聞 ・ クィディッチ欄</p><div class="card"><div class="card-b center muted" style="padding:28px">まだ記事がありません。試合（節）を進めると、毎週の詳報・コラム・アワード予想などが掲載されます。</div></div>`;
   const sel=clamp(G.prophetSel||0,0,issues.length-1);
   const L=issues[sel];
+  if(G.npArticle!=null)return prophetArticlePage(L,G.npArticle); // 記事の中ページ
   const lead=L.sections.find(s=>s.kind==='lead');
   const boxes=L.sections.filter(s=>s.kind==='box');
   const arts=L.sections.filter(s=>s.kind==='article');
-  const dateline=L.type==='preseason'?'開幕前特別号':L.type==='draft'?'ドラフト特集号':L.type==='playoff'?'プレーオフ特集号':L.type==='champion'?'優勝特集号 ・ 号外':`第${L.wk}節`;
   const leadHtml=lead?`<div class="np-lead"><div class="lab">${lead.lab||'トップ記事'}</div><h2>${lead.title}</h2><div class="np-byline">本紙 ${lead.byline||npBy()} 記者</div><div class="np-drop">${lead.html}</div></div>`:'';
   const boxHtml=boxes.length?`<div class="np-boxes">${boxes.map(b=>`<div class="np-box"><div class="bt">${b.title}</div>${b.html}</div>`).join('')}</div>`:'';
-  const open=(G.npOpen==null?-1:G.npOpen);
-  const artHtml=arts.length?`<div class="np-list">${arts.map((a,i)=>{
-    const isOpen=open===i;
-    const teaser=a.html.replace(/<[^>]+>/g,'').slice(0,64);
-    return `<div class="np-art ${isOpen?'open':''}">
-      <div class="np-head" data-nparticle="${i}">
-        <div class="lab">${a.lab||''}</div>
-        <h3><span>${a.title}</span><span class="np-toggle">${isOpen?'−':'＋'}</span></h3>
-        ${a.byline?`<div class="np-byline">本紙 ${a.byline} 記者</div>`:''}
-        ${isOpen?'':`<p class="np-teaser">${teaser}… <span class="gold">見出しを押して全文を読む ▸</span></p>`}
-      </div>
-      ${isOpen?`<div class="np-full">${a.html}</div>`:''}
+  const artHtml=arts.length?`<div class="np-cols">${arts.map((a,i)=>{
+    const teaser=a.html.replace(/<[^>]+>/g,'').slice(0,92);
+    return `<div class="np-art np-clk" data-nparticle="${i}">
+      <div class="lab">${a.lab||''}</div>
+      <h3>${a.title}</h3>
+      ${a.byline?`<div class="np-byline">本紙 ${a.byline} 記者</div>`:''}
+      <p class="np-teaser">${teaser}…</p>
+      <span class="np-more">見出しを押して全文を読む ▸</span>
     </div>`;
   }).join('')}</div>`:'';
   const back=issues.map((is,i)=>`<button class="btn sm ${i===sel?'gold':'ghost'}" data-prophet="${i}">${is.type==='preseason'?'開幕前':is.type==='draft'?'ドラフト':is.type==='playoff'?'PO':is.type==='champion'?'👑優勝':'第'+is.wk+'節'} <span class="tiny muted">S${is.season}</span></button>`).join('');
   return `${NP_CSS}<p class="eyebrow">日刊預言者新聞 ・ クィディッチ欄</p>
   <div class="np-paper">
     <div class="np-mast"><div class="np-titl">日刊預言者新聞</div>
-      <div class="np-sub"><span>クィディッチ欄</span><span>シーズン ${L.season} ・ ${dateline}</span><span>対価 5クヌート</span></div></div>
+      <div class="np-sub"><span>クィディッチ欄</span><span>シーズン ${L.season} ・ ${npDateline(L)}</span><span>対価 5クヌート</span></div></div>
     <div class="np-body">${leadHtml}${boxHtml}${artHtml}</div>
   </div>
   <div class="card" style="margin-top:14px"><div class="card-h"><h3>バックナンバー</h3><span class="tiny muted">${issues.length}号</span></div><div class="card-b"><div style="display:flex;flex-wrap:wrap;gap:6px">${back}</div></div></div>`;
@@ -3502,7 +3556,7 @@ function renderMatch(){
    ACTION BINDING (event delegation on document)
 ============================================================ */
 document.addEventListener("click",e=>{
-  const t=e.target.closest("[data-view],[data-train],[data-style],[data-formation],[data-tempo],[data-press],[data-beater],[data-seeker],[data-sign],[data-release],[data-detail],[data-rankcat],[data-rankpos],[data-rankmetric],[data-loadslot],[data-delslot],[data-delok],[data-tpartner],[data-tgive],[data-tget],[data-tcash],[data-acceptoffer],[data-declineoffer],[data-fxfilter],[data-draft],[data-prophet],[data-nparticle],[data-searchpos],[data-searchovr],[data-rosterclub],[data-rosterdetail],[data-result],[data-schedround],#rosterClose,#play,#poPlay,#playPre,#nextWeek,#toOffseason,#autoLu,#scout,#nextSeason,#toDraft,#closeDetail,#saveFile,#loadBtn,#quickSave,#quickLoad,#wipeSave,#continueSave,#openSlots,#slotsClose,#slotsBackdrop,#slotSaveNew,#delCancel,#sendTrade");
+  const t=e.target.closest("[data-view],[data-train],[data-style],[data-formation],[data-tempo],[data-press],[data-beater],[data-seeker],[data-sign],[data-release],[data-detail],[data-rankcat],[data-rankpos],[data-rankmetric],[data-loadslot],[data-delslot],[data-delok],[data-tpartner],[data-tgive],[data-tget],[data-tcash],[data-acceptoffer],[data-declineoffer],[data-fxfilter],[data-draft],[data-prophet],[data-nparticle],#npBack,#npBack2,[data-searchpos],[data-searchovr],[data-rosterclub],[data-rosterdetail],[data-result],[data-schedround],#rosterClose,#play,#poPlay,#playPre,#nextWeek,#toOffseason,#autoLu,#scout,#nextSeason,#toDraft,#closeDetail,#saveFile,#loadBtn,#quickSave,#quickLoad,#wipeSave,#continueSave,#openSlots,#slotsClose,#slotsBackdrop,#slotSaveNew,#delCancel,#sendTrade");
   if(!t)return;
   if(t.dataset.tpartner){G.trade.partner=+t.dataset.tpartner;G.trade.get=[];render();return;}
   if(t.dataset.tgive){const id=+t.dataset.tgive;G.trade.give=G.trade.give.includes(id)?G.trade.give.filter(x=>x!==id):[...G.trade.give,id];render();return;}
@@ -3538,8 +3592,9 @@ document.addEventListener("click",e=>{
   if(t.id==="playPre"){startPreseasonMatch();return;}
   if(t.id==="toOffseason"){G.week=calIndex('combine');G.phase='offseason';G.view='dashboard';render();return;}
   if(t.dataset.draft){draftPick(+t.dataset.draft);return;}
-  if(t.dataset.prophet){G.prophetSel=+t.dataset.prophet;G.npOpen=null;G.view="prophet";render();return;}
-  if(t.dataset.nparticle!==undefined){const i=+t.dataset.nparticle;G.npOpen=(G.npOpen===i?null:i);render();return;}
+  if(t.dataset.prophet){G.prophetSel=+t.dataset.prophet;G.npArticle=null;G.view="prophet";render();return;}
+  if(t.dataset.nparticle!==undefined){G.npArticle=+t.dataset.nparticle;render();return;}
+  if(t.id==="npBack"||t.id==="npBack2"){G.npArticle=null;render();return;}
   if(t.dataset.rosterclub){G.rosterClub=+t.dataset.rosterclub;G.rosterDetailId=null;render();return;}
   if(t.dataset.rosterdetail){G.rosterDetailId=+t.dataset.rosterdetail;render();return;}
   if(t.id==="rosterClose"){G.rosterDetailId=null;render();return;}
