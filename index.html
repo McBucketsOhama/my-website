@@ -1325,6 +1325,7 @@ function finalizeRound(){
   G.clubs.forEach(c=>{if(c.idx!==G.user&&G.round%2===0)applyTraining(c,"balanced");});
   // 週ごとの自然なOVR変動（全クラブ・少しずつ。ユーザーは育成方針を反映）
   G.clubs.forEach(c=>weeklyDevelop(c,c.idx===G.user?G.training:null));
+  aiTradeRound(); // CPU同士のトレード（期限内）
   G.round++;
   G.match=null;
   if(G.round%4===0)refreshMarket();
@@ -1685,6 +1686,55 @@ function acceptOffer(oid){
   render();
 }
 function declineOffer(oid){G.offers=(G.offers||[]).filter(x=>x.id!==oid);pushNews("🙅","トレードオファーを辞退しました。");render();}
+
+/* ===== CPU同士のトレード（トレード期限内） ===== */
+function aiSpare(club){
+  // 各ポジションの必要人数を超えて余っている選手（＝放出可能）
+  return club.squad.filter(p=>club.squad.filter(x=>x.pos===p.pos).length>POS[p.pos].count);
+}
+function aiPosStrength(club,pos){
+  // そのポジションの主力（上位 必要数）の平均OVR
+  const arr=club.squad.filter(p=>p.pos===pos).sort((a,b)=>overall(b)-overall(a)).slice(0,POS[pos].count);
+  return arr.length?arr.reduce((s,p)=>s+overall(p),0)/arr.length:0;
+}
+function aiWeakestPos(club){
+  return POS_ORDER.slice().sort((x,y)=>aiPosStrength(club,x)-aiPosStrength(club,y))[0];
+}
+function findAiDeal(A,B){
+  const wA=aiWeakestPos(A), wB=aiWeakestPos(B);
+  if(wA===wB)return null;                            // 互いに別の穴を埋め合う
+  // B が A の穴(wA)を埋められる放出可能な即戦力 / その逆
+  const fromB=aiSpare(B).filter(p=>p.pos===wA && overall(p)>=aiPosStrength(A,wA));
+  const fromA=aiSpare(A).filter(p=>p.pos===wB && overall(p)>=aiPosStrength(B,wB));
+  if(!fromB.length||!fromA.length)return null;
+  fromA.sort((a,b)=>playerValue(a)-playerValue(b));
+  fromB.sort((a,b)=>playerValue(a)-playerValue(b));
+  for(const pa of fromA)for(const pb of fromB){
+    const va=playerValue(pa), vb=playerValue(pb);
+    if(Math.abs(va-vb)/Math.max(va,vb,1)>0.45)continue; // 価値が概ね釣り合う
+    if(payroll(A)-(pa.salary||0)+(pb.salary||0)>SALARY_CAP)continue; // 双方キャップ内
+    if(payroll(B)-(pb.salary||0)+(pa.salary||0)>SALARY_CAP)continue;
+    return {pa,pb};
+  }
+  return null;
+}
+function executeAiTrade(A,B,pa,pb){
+  A.squad=A.squad.filter(p=>p.id!==pa.id);
+  B.squad=B.squad.filter(p=>p.id!==pb.id);
+  A.squad.push(pb);B.squad.push(pa);
+  pushNews('🔄',`トレード成立: ${A.name} ⇄ ${B.name} ── ${pa.name}（${POS[pa.pos].short}・OVR${overall(pa)}）と ${pb.name}（${POS[pb.pos].short}・OVR${overall(pb)}）が交換。`);
+}
+function aiTradeRound(){
+  if(!tradeOpen())return;            // トレード期限内のみ
+  if(rng()>0.4)return;               // 週ごと約40%で成立を試みる
+  const ai=G.clubs.filter(c=>c.idx!==G.user);
+  if(ai.length<2)return;
+  for(let attempt=0;attempt<10;attempt++){
+    const A=pick(ai), B=pick(ai.filter(c=>c!==A));
+    const deal=findAiDeal(A,B);
+    if(deal){executeAiTrade(A,B,deal.pa,deal.pb);return;}
+  }
+}
 
 
 let _flash=null;
