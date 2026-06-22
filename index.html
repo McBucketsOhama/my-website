@@ -1120,16 +1120,23 @@ function applyResult(h,a,hs,as){
 ============================================================ */
 const TRAIN={attack:["att","tec"],defense:["def","men"],speed:["spd"],technique:["tec"],fitness:["sta"],balanced:["att","def","spd","tec"]};
 function applyTraining(club,focus){
-  // コンディション回復と怪我のカウントダウン（OVRの成長/衰えは weeklyDevelop が担当）
+  // 怪我のカウントダウン（離脱週数を消化）。体力回復は recoverFitness が担当
   for(const p of club.squad){
     if(p.inj>0){
       p.inj--;
       p.fitness=clamp((p.fitness||100)+ri(3,7),0,100);
       if(p.inj===0){p.fitness=Math.min(p.fitness,68);p.injType=null;if(club.idx===G.user)pushNews("🩹",`${p.name} が負傷から復帰（コンディション ${Math.round(p.fitness)}%）。`);}
-      continue;
     }
-    p.fitness=Math.min(100,(p.fitness||100)+ri(8,18));
   }
+}
+/* 体力(疲労)回復：休んだ選手ほど大きく回復、出場した選手は小さい → 連戦で疲労が蓄積 */
+function recoverFitness(playedIds){
+  G.clubs.forEach(c=>c.squad.forEach(p=>{
+    if(p.inj>0)return;
+    const played=playedIds&&playedIds.has(p.id);
+    p.fitness=clamp((p.fitness||100)+(played?ri(7,11):ri(15,24)),0,100); // 休んだ選手は速く回復
+
+  }));
 }
 /* 週ごとの自然なOVR変動 ── ポテンシャル差×年齢で「少しずつ」上下（1ステップ≒OVR±1） */
 function weeklyDevelop(club,focus){
@@ -1155,17 +1162,26 @@ const INJ_TYPES=[
   {name:"重傷",  min:11,max:16,p:0.02},
 ];
 function rollInjury(){let r=rng(),a=0;for(const t of INJ_TYPES){a+=t.p;if(r<a)return{type:t.name,weeks:ri(t.min,t.max)};}return{type:"打撲",weeks:1};}
-function injuryCheck(){
-  // 出場した各スターターが負傷しうる（コンディションが低いほど高リスク）
-  const club=G.clubs[G.user];
-  const starters=lineupPlayers(club,G.lineup||bestLineup(club)).filter(p=>p.inj===0);
-  starters.forEach(p=>{
-    const risk=Math.max(0.012,0.035*(1.4-(p.fitness||100)/100));
+/* 試合の長さ係数（長い試合ほど消耗大） */
+function matchLenFactor(ev){
+  const last=(ev&&ev.length)?ev[ev.length-1].min:300;
+  return clamp(last/320,0.5,1.8);
+}
+/* 出場による疲労（体力低下）＋疲労起因の負傷判定。出場した選手に適用（全クラブ） */
+function applyMatchLoad(club,lu,lf){
+  lineupPlayers(club,lu).forEach(p=>{
+    if(p.inj>0)return;
+    // 連戦・長い試合・低スタミナほど大きく消耗 → 体力(=疲労度)が下がる
+    const staResist=clamp((p.sta||60)/100,0.3,1);
+    const drain=(10+6*lf)*(1.25-staResist*0.6); // 出場で必ず消耗（基礎）＋長い試合で上乗せ、スタミナで軽減
+    p.fitness=clamp((p.fitness||100)-drain,5,100);
+    // 疲労が溜まる（体力が低い）ほど怪我のリスクが高い
+    const risk=clamp(0.012+0.06*(1-(p.fitness||100)/100)+0.015*lf,0.008,0.15);
     if(rng()<risk){
-      const inj=rollInjury();
+      const inj=rollInjury(); // 程度に応じて離脱週数が決まる
       p.inj=inj.weeks;p.injType=inj.type;
-      p.fitness=Math.max(25,(p.fitness||100)-ri(18,38));
-      pushNews("🚑",`${p.name} が${inj.type}で離脱（約${inj.weeks}節）。`);
+      p.fitness=Math.max(15,(p.fitness||100)-ri(8,20));
+      if(club.idx===G.user)pushNews("🚑",`${p.name} が${inj.type}で離脱（約${inj.weeks}節）。${(p.fitness<42||lf>1.2)?'疲労の蓄積も一因か。':''}`);
     }
   });
 }
@@ -1233,7 +1249,9 @@ function passWeek(){
   const c=calWeek();
   if(c.type==='po'){poAdvanceWeek();return;} // プレーオフ週の「次の週へ」
   if(c.type==='bye'){
-    applyTraining(G.clubs[G.user],G.training);injuryCheck();G.clubs.forEach(cl=>{if(cl.idx!==G.user)applyTraining(cl,'balanced');});
+    // バイウィークは全員休養：怪我カウントダウン＋全員しっかり回復（試合なし＝疲労なし）
+    G.clubs.forEach(cl=>applyTraining(cl,'balanced'));
+    recoverFitness(null);
     G.offers=[];pushNews('🔒','トレードデッドライン（バイウィーク）を経過。今季のトレードは締め切られました。');
   }
   G.week++;
@@ -1318,6 +1336,8 @@ function finalizeRound(){
   pushNews(meWon?"🏆":draw?"🤝":"💔",
     `第${G.round+1}節: ${G.clubs[m.home].name} ${m.hs} - ${m.as} ${G.clubs[m.away].name} （${meWon?"勝利":draw?"引分":"敗戦"}）`);
   G.results[G.round]=[{h:m.home,a:m.away,hs:m.hs,as:m.as,box:boxScore(m.ev,G.clubs[m.home],G.clubs[m.away])}];
+  const ulf=matchLenFactor(m.ev);
+  const loads=[[G.clubs[m.home],m.homeLu,ulf],[G.clubs[m.away],m.awayLu,ulf]]; // 出場負荷（疲労）を後でまとめて適用
   // other matches（CPU同士も完全シミュレーションし、詳細を保存）
   for(const [h,a] of fx){
     if(h===G.user||a===G.user)continue;
@@ -1326,13 +1346,18 @@ function finalizeRound(){
     applyResult(h,a,q.hs,q.as);
     accumulateStats(q.ev,hl,al,G.clubs[h],G.clubs[a]);
     G.results[G.round].push({h,a,hs:q.hs,as:q.as,box:boxScore(q.ev,G.clubs[h],G.clubs[a])});
+    const lfq=matchLenFactor(q.ev);
+    loads.push([G.clubs[h],hl,lfq],[G.clubs[a],al,lfq]);
   }
   scoutProspects();
+  const playedIds=new Set();loads.forEach(([c,lu])=>lineupPlayers(c,lu).forEach(p=>playedIds.add(p.id)));
+  // ① 既存の怪我カウントダウン（全クラブ）
+  G.clubs.forEach(c=>applyTraining(c,c.idx===G.user?G.training:'balanced'));
+  // ② 出場による疲労蓄積＋疲労起因の新規負傷（出場選手のみ）
+  loads.forEach(([c,lu,lf])=>applyMatchLoad(c,lu,lf));
+  // ③ 体力回復（休んだ選手ほど大きく、出場した選手は小さく → 連戦で疲労が蓄積）
+  recoverFitness(playedIds);
   generateProphet();
-  applyTraining(G.clubs[G.user],G.training);
-  injuryCheck();
-  // AI clubs light training
-  G.clubs.forEach(c=>{if(c.idx!==G.user&&G.round%2===0)applyTraining(c,"balanced");});
   // 週ごとの自然なOVR変動（全クラブ・少しずつ。ユーザーは育成方針を反映）
   G.clubs.forEach(c=>weeklyDevelop(c,c.idx===G.user?G.training:null));
   aiTradeRound(); // CPU同士のトレード（期限内）
@@ -1386,7 +1411,7 @@ function newSeason(){
   let renewals=0;const myNotes=[];
   G.clubs.forEach(c=>{
     c.P=c.W=c.D=c.L=c.PF=c.PA=0;
-    c.squad.forEach(p=>{p.age++;p.season={gp:0,goals:0,catches:0};p.fitness=Math.min(100,(p.fitness||100)+20);p.inj=0;p.injType=null;});
+    c.squad.forEach(p=>{p.age++;p.season={gp:0,goals:0,catches:0};p.fitness=100;p.inj=0;p.injType=null;}); // オフは長期休養で全快
     const notes=offseasonDevelop(c);if(c.idx===G.user)myNotes.push(...notes);
     c.squad.forEach(p=>{p.years=(p.years||1)-1;if(p.years<=0){p.years=ri(1,3);p.salary=contractSalary(p);if(c.idx===G.user)renewals++;}});
     if(c.idx!==G.user)trimRoster(c);
@@ -2063,7 +2088,7 @@ function renderSquad(){
     return `<div class="card" style="margin-bottom:16px"><div class="card-h"><h3><span class="pos ${pos}">${POS[pos].short}</span>&nbsp; ${POS[pos].name}</h3><span class="tiny muted">${club.squad.filter(p=>p.pos===pos).length} 名</span></div>
       <div class="card-b" style="padding:0"><table><thead><tr><th>OVR</th><th>選手</th><th class="center">年齢</th><th class="center">体力</th><th class="num">評価額</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
   }).join("");
-  return `<p class="eyebrow">スカッド管理</p><p class="tiny muted" style="margin-top:-4px">選手を選ぶと詳細ステータスを表示。放出すると評価額の40%が予算に入ります。</p>${groups}${detailPanel()}`;
+  return `<p class="eyebrow">スカッド管理</p><p class="tiny muted" style="margin-top:-4px">選手を選ぶと詳細ステータスを表示。<b>体力</b>は疲労度の目安で、出場(特に長い試合・連戦)で低下し、休むと回復します。体力が低いほど<b class="quaffle">怪我のリスク</b>が上がるため、ローテーションが重要です。</p>${groups}${detailPanel()}`;
 }
 let _detailId=null;
 function detailPanel(){
