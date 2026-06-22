@@ -668,6 +668,14 @@ const POS={
 };
 const POS_ORDER=["CH","BE","KE","SE"];
 const STAT_LABELS={att:"攻撃",def:"守備",spd:"速さ",tec:"技術",sta:"体力",men:"精神"};
+const STAT_KEYS=["att","def","spd","tec","sta","men"];
+/* 詳細表示用：ポジション別の能力名（Quidditch.xlsx の体系に一致）。順序もExcelに合わせる */
+const POS_ATTR={
+  KE:[["tec","テクニック"],["spd","スピード"],["men","システム順応"],["sta","ポジショニング"],["att","反射神経"],["def","セービング"]],
+  BE:[["tec","テクニック"],["spd","スピード"],["men","システム順応"],["sta","エイミング"],["att","パワー"],["def","ディフレクション"]],
+  CH:[["tec","テクニック"],["spd","スピード"],["men","システム順応"],["att","シュート"],["def","回避"],["sta","連携力"]],
+  SE:[["tec","テクニック"],["spd","スピード"],["men","システム順応"],["att","探索力"],["def","マーク"],["sta","判断力"]],
+};
 
 const TEAMS=[
   {name:"パドルミアユナイテッド", str:75, roster:[
@@ -844,6 +852,7 @@ function makePlayer(pos,teamStr,opts){
   const p={id:_pid++,name,pos,age,nat,fem,...st,
     fitness:100,form:0,inj:0,
     potential:0,value:0,star:!!opts.name,
+    growth:pick(["早熟","普通","普通","晩期"]),injRes:ri(60,95),
     season:{gp:0,goals:0,catches:0}};
   const ovr=overall(p);
   p.potential=clamp(Math.round(ovr+(age<=21?ri(4,17):age<=25?ri(0,9):ri(-4,4))),ovr,99);
@@ -852,7 +861,8 @@ function makePlayer(pos,teamStr,opts){
   p.salary=contractSalary(p);
   return p;
 }
-function overall(p){let s=0;for(const k in POS[p.pos].w)s+=p[k]*POS[p.pos].w[k];return Math.round(s);}
+/* OVR = 6能力の単純平均（Quidditch.xlsx の算出方式に合わせる。試合シミュは個別能力を使用） */
+function overall(p){return Math.round((p.att+p.def+p.spd+p.tec+p.sta+p.men)/6);}
 function playerValue(p){
   const o=overall(p);
   const ageMult=p.age<=23?1.25:p.age<=27?1.1:p.age<=30?0.8:0.45;
@@ -872,25 +882,20 @@ function sumSalary(ids,club){return ids.reduce((s,id)=>{const p=getP(club,id);re
 function sumValue(ids,club){return ids.reduce((s,id)=>{const p=getP(club,id);return s+(p?playerValue(p):0);},0);}
 function ovrTier(o){return o>=88?"t1":o>=80?"t2":o>=72?"t3":o>=63?"t4":"t5";}
 
-/* overall() が target になるよう全ステータスにオフセットを加える（重み和=1なので加算量だけoverallが動く） */
+/* overall(=単純平均) が target になるよう全6能力を均等に増減 */
 function setOVR(p,target){
-  const d=target-overall(p);
-  if(d!==0)for(const k of ["att","def","spd","tec","sta","men"])p[k]=clamp(p[k]+d,25,99);
-  const ks=Object.keys(POS[p.pos].w);const key=ks.reduce((a,b)=>POS[p.pos].w[b]>POS[p.pos].w[a]?b:a);
-  let guard=24;
-  while(overall(p)<target&&guard-->0){if(p[key]>=99)break;p[key]=clamp(p[key]+1,25,99);}
-  guard=24;
-  while(overall(p)>target&&guard-->0){if(p[key]<=25)break;p[key]=clamp(p[key]-1,25,99);}
+  let guard=60;
+  while(overall(p)<target&&guard-->0){let any=false;for(const k of STAT_KEYS)if(p[k]<99){p[k]++;any=true;}if(!any)break;}
+  guard=60;
+  while(overall(p)>target&&guard-->0){let any=false;for(const k of STAT_KEYS)if(p[k]>25){p[k]--;any=true;}if(!any)break;}
 }
-/* Excel由来の実選手を正確に再現（OVR/POT/年齢/国籍/能力を保持） */
+/* Excel由来の実選手を正確に再現（能力値そのもの＝OVRも単純平均で一致） */
 function makeXlsxPlayer(x){
   const pos=POS_KEY[x.p];
   const p={id:_pid++,name:x.n,pos,age:x.age,nat:x.nat,fem:isFemale(x.n),
     att:x.att,def:x.def,spd:x.spd,tec:x.tec,sta:x.sta,men:x.men,
-    fitness:100,form:0,inj:0,injType:null,potential:Math.max(x.pot,1),value:0,star:true,
+    fitness:100,form:0,inj:0,injType:null,potential:Math.max(x.pot,overall({att:x.att,def:x.def,spd:x.spd,tec:x.tec,sta:x.sta,men:x.men})),value:0,star:true,
     growth:x.g,injRes:x.ir,season:{gp:0,goals:0,catches:0}};
-  setOVR(p,x.ovr);                              // 表示OVRをExcel値に固定
-  p.potential=clamp(Math.max(x.pot,overall(p)),overall(p),99);
   usedNames.add(p.name);
   p.value=playerValue(p);p.years=ri(2,4);p.salary=contractSalary(p);
   return p;
@@ -1296,7 +1301,7 @@ function weeklyDevelop(club,focus){
   const boost=(focus&&TRAIN[focus])?1.25:1.0; // 育成方針のあるユーザークラブはやや速い
   club.squad.forEach(p=>{
     if(p.inj>0)return; // 負傷中は成長しない
-    const ks=Object.keys(POS[p.pos].w);
+    const ks=STAT_KEYS;
     const gap=p.potential-overall(p);
     const ageF = p.age<=20?1.0 : p.age<=23?0.72 : p.age<=26?0.42 : p.age<=29?0.20 : 0.05;
     // 成長スピード: 早熟=若いうちに急成長・衰え早い / 晩期=遅咲きだが長く伸び衰え遅い
@@ -1360,7 +1365,7 @@ function applyMatchLoad(club,lu,lf){
 /* ロスター上限・自由契約(FA)選手の生成 */
 const ROSTER_MAX=16, ROSTER_MIN=10;
 function rosterCount(club){return club.squad.length;}
-function trimToOVR(p,target){const ks=Object.keys(POS[p.pos].w);let g=60;while(overall(p)>target&&g-->0){const k=pick(ks);p[k]=clamp(p[k]-1,25,99);}}
+function trimToOVR(p,target){const ks=STAT_KEYS;let g=80;while(overall(p)>target&&g-->0){const k=pick(ks);if(p[k]>25)p[k]=clamp(p[k]-1,25,99);}}
 function makeFreeAgent(){
   const pos=pick(POS_ORDER);const r=rng();
   // FAに大物は出ない: 大半は控え〜ロール級、稀に即戦力どまり
@@ -1552,7 +1557,7 @@ function endSeason(){
 function offseasonDevelop(club){
   const notes=[];
   club.squad.forEach(p=>{
-    const before=overall(p);const ks=Object.keys(POS[p.pos].w);
+    const before=overall(p);const ks=STAT_KEYS;
     const gap=p.potential-overall(p);
     // オフシーズンは「大幅に」変動。若手はポテンシャル差で大きく伸び、高齢は大きく衰える
     let base = p.age<=21?ri(2,6) : p.age<=24?ri(1,4) : p.age<=27?ri(-1,3) : p.age<=30?ri(-3,1) : ri(-6,-1);
@@ -2345,14 +2350,18 @@ function renderSquad(){
   }).join("");
   return `<p class="eyebrow">スカッド管理</p><p class="tiny muted" style="margin-top:-4px">選手を選ぶと詳細ステータスを表示。<b>体力</b>は疲労度の目安で、出場(特に長い試合・連戦)で低下し、休むと回復します。体力が低いほど<b class="quaffle">怪我のリスク</b>が上がるため、ローテーションが重要です。</p>${groups}${detailPanel()}`;
 }
+/* ポジション別の能力バー（Quidditch.xlsx の名称・値に一致） */
+function attrBars(p){
+  return (POS_ATTR[p.pos]||[]).map(([k,label])=>{
+    const v=p[k];const c=v>=80?"var(--gold)":v>=70?"var(--aqua)":v>=60?"var(--blue)":"var(--muted2)";
+    return `<div class="statbar"><span class="lbl" style="width:88px">${label}</span><div class="track"><div class="fill" style="width:${v}%;background:${c}"></div></div><span class="val">${v}</span></div>`;
+  }).join("");
+}
 let _detailId=null;
 function detailPanel(){
   if(_detailId==null)return "";
   const club=G.clubs[G.user];const p=getP(club,_detailId);if(!p)return"";
-  const bars=["att","def","spd","tec","sta","men"].map(k=>{
-    const v=p[k];const c=v>=80?"var(--gold)":v>=70?"var(--aqua)":v>=60?"var(--blue)":"var(--muted2)";
-    return `<div class="statbar"><span class="lbl">${STAT_LABELS[k]}</span><div class="track"><div class="fill" style="width:${v}%;background:${c}"></div></div><span class="val">${v}</span></div>`;
-  }).join("");
+  const bars=attrBars(p);
   const o=overall(p);
   return `<div class="card" style="margin-top:4px;border-color:var(--gold-soft)"><div class="card-h"><h3>${flag(p.nat)} ${p.name} ${p.star?'<span class="gold">★</span>':''}</h3><button class="btn sm ghost" id="closeDetail">閉じる</button></div>
    <div class="card-b"><div class="grid cols-2">
@@ -2366,9 +2375,11 @@ function detailPanel(){
       ${bars}
     </div>
     <div>
+      <div class="eyebrow">プロフィール</div>
+      <div class="tiny" style="margin:6px 0 10px;line-height:1.9">OVR <b>${o}</b> ・ POT <b>${p.potential}</b><br>成長スピード <b>${p.growth||'普通'}</b> ・ 怪我耐性 <b>${p.injRes!=null?p.injRes:'—'}</b></div>
       <div class="eyebrow">コンディション</div>
       <div class="statbar"><span class="lbl">体力</span><div class="track"><div class="fill" style="width:${p.fitness}%;background:var(--aqua)"></div></div><span class="val">${Math.round(p.fitness*10)/10}</span></div>
-      ${p.inj>0?`<div class="pill loss" style="margin-top:8px">負傷 ${p.inj}節</div>`:`<div class="pill win" style="margin-top:8px">出場可</div>`}
+      ${p.inj>0?`<div class="pill loss" style="margin-top:8px">負傷 ${p.inj}節（${p.injType||'負傷'}）</div>`:`<div class="pill win" style="margin-top:8px">出場可</div>`}
       <div class="divider"></div>
       <button class="btn danger" data-release="${p.id}">契約を解除して放出</button>
     </div>
@@ -2794,7 +2805,7 @@ function rosterRow(p,ci){
 function rosterDetailCard(ci){
   if(G.rosterDetailId==null)return '';
   const club=G.clubs[ci];const p=getP(club,G.rosterDetailId);if(!p)return '';
-  const bars=["att","def","spd","tec","sta","men"].map(k=>{const v=p[k];const c=v>=80?'var(--gold)':v>=70?'var(--aqua)':v>=60?'var(--blue)':'var(--muted2)';return `<div class="statbar"><span class="lbl">${STAT_LABELS[k]}</span><div class="track"><div class="fill" style="width:${v}%;background:${c}"></div></div><span class="val">${v}</span></div>`;}).join('');
+  const bars=attrBars(p);
   const o=overall(p);const s=p.school?schoolObj(p.school):null;
   return `<div class="card" style="margin-top:4px;border-color:var(--gold-soft)"><div class="card-h"><h3>${flag(p.nat)} ${p.name} ${p.star?'<span class="gold">★</span>':''}</h3><button class="btn sm ghost" id="rosterClose">閉じる</button></div>
    <div class="card-b"><div class="grid cols-2">
@@ -2804,6 +2815,8 @@ function rosterDetailCard(ci){
       ${bars}
     </div>
     <div>
+      <div class="eyebrow">プロフィール</div>
+      <div class="tiny" style="margin:6px 0 10px;line-height:1.9">OVR <b>${o}</b> ・ POT <b>${p.potential}</b><br>成長スピード <b>${p.growth||'普通'}</b> ・ 怪我耐性 <b>${p.injRes!=null?p.injRes:'—'}</b></div>
       <div class="eyebrow">コンディション</div>
       <div class="statbar"><span class="lbl">体力</span><div class="track"><div class="fill" style="width:${p.fitness}%;background:var(--aqua)"></div></div><span class="val">${Math.round(p.fitness*10)/10}</span></div>
       ${p.inj>0?`<div class="pill loss" style="margin-top:8px">負傷 ${p.inj}節（${p.injType||'負傷'}）</div>`:`<div class="pill win" style="margin-top:8px">出場可</div>`}
@@ -3558,7 +3571,7 @@ function makeProspect(){
 function scoutProspects(){
   if(!G.prospects)return;
   G.prospects.forEach(p=>{
-    if(rng()<0.35){const k=pick(Object.keys(POS[p.pos].w));p[k]=clamp(p[k]+(rng()<0.5?1:-1),25,99);}
+    if(rng()<0.35){const k=pick(STAT_KEYS);p[k]=clamp(p[k]+(rng()<0.5?1:-1),25,99);}
     if(rng()<0.5)p.potential=p.potential+ri(-2,2);
     p.potential=clamp(p.potential,overall(p),99);
     p.value=playerValue(p);
