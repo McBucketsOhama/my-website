@@ -2711,28 +2711,83 @@ function awardRace(){
 }
 function pushIssue(issue){G.prophet=G.prophet||[];G.prophet.unshift(issue);if(G.prophet.length>60)G.prophet.pop();G.prophetSel=0;}
 
+/* 直近成績・連勝/連敗 */
+function clubForm(idx,n){
+  const arr=[];
+  for(let r=G.results.length-1;r>=0;r--){const day=G.results[r];if(!day)continue;const m=day.find(x=>x.h===idx||x.a===idx);if(!m)continue;const isH=m.h===idx;const gf=isH?m.hs:m.as,ga=isH?m.as:m.hs;arr.push(gf>ga?'W':gf<ga?'L':'D');if(n&&arr.length>=n)break;}
+  return arr; // 新しい順
+}
+function clubStreak(idx){const r=clubForm(idx);if(!r.length)return{type:'-',n:0};const t=r[0];let n=0;for(const x of r){if(x===t)n++;else break;}return{type:t,n};}
+function npStreakPhrase(idx){const s=clubStreak(idx);if(s.n<2)return'';return s.type==='W'?`${s.n}連勝中`:s.type==='L'?`${s.n}連敗中`:`${s.n}試合連続ドロー`;}
+function npQuote(){return `<div class="np-quote">「${pick(['勝負はこれからだ','シーズンは長い','勢いこそが全て','細部が勝敗を分ける','栄光は準備した者に訪れる','一戦必勝あるのみ','データは嘘をつかない','勝者のメンタリティが違う'])}」── ${pick(['関係者','ある名将','リーグOB','本紙評論員','古参のファン'])}談</div>`;}
+
 function npColumn(tbl){
   const leader=tbl[0],second=tbl[1],last=tbl[tbl.length-1];
+  const gap=second?Math.max(0,leader.P-second.P):0;
+  const byAtk=[...G.clubs].sort((a,b)=>b.PF-a.PF), byDef=[...G.clubs].sort((a,b)=>a.PA-b.PA);
+  const pred=predictedTable();const pr={};pred.forEach((c,i)=>pr[c.idx]=i);const ar={};tbl.forEach((c,i)=>ar[c.idx]=i);
+  const surprise=[...tbl].sort((a,b)=>(pr[b.idx]-ar[b.idx])-(pr[a.idx]-ar[a.idx]))[0];
+  const slump=[...tbl].sort((a,b)=>(ar[a.idx]-pr[a.idx])-(ar[b.idx]-pr[b.idx]))[0];
+  const {sc}=npLeagueLeaders();const topScorer=sc[0];
+  const lstreak=npStreakPhrase(leader.idx);
+  const cut=tbl[7],out=tbl[8];
   const topics=[
-    {t:`${leader.name}の首位は本物か`,b:`<p>勝点${leader.P}で首位を走る${leader.name}。${second?`${second.name}が${Math.max(0,leader.P-second.P)}差で続くが、`:''}その戦いぶりは安定感を増している。${pick(['補強の成果が出始めた','若手の台頭が大きい','戦術の徹底が光る','選手層の厚みが効いている'])}と見る向きが多い。</p>`},
-    {t:`混戦のプレーオフ争い`,b:`<p>上位8チームに入るための争いは熾烈だ。中位グループは勝点差わずかにひしめき、残り試合の一つひとつが順位を大きく動かしかねない。各クラブのベンチワークに注目が集まる。</p>`},
-    {t:`${last.name}に再建の青写真は`,b:`<p>最下位に沈む${last.name}。しかし若い世代には光るものがあり、次のドラフトと移籍市場での動き次第では一気に浮上する余地も残されている。フロントの手腕が問われる。</p>`},
-    {t:`戦術トレンドを読み解く`,b:`<p>今季は隊形とテンポの使い分けが勝敗を分けている。高速テンポで主導権を握るクラブがある一方、堅守速攻で番狂わせを演じるクラブも。${pick(['データはその有効性を裏付ける','ファンの間でも議論を呼んでいる'])}。</p>`},
+    {lab:'コラム ・ 首位攻防', t:`${leader.name}、王者の風格漂う`, b:
+      `<p>勝点${leader.P}でリーグの頂点に立つ${leader.name}。${lstreak?`現在<b>${lstreak}</b>と勢いに乗り、`:''}${second?`2位${second.name}との差を${gap}点に広げた。`:'独走の気配すら漂う。'}その強さの源泉はどこにあるのか。</p>`+
+      `<p>${pick(['攻撃力はリーグ屈指','堅守がチームの背骨','選手層の厚みが連戦を支える','戦術の完成度が一段高い'])}と専門家は口を揃える。${topScorer?`エース格 ${topScorer.p.name} の${topScorer.p.season.goals}ゴールも牽引役だ。`:''}死角は見当たらないが、長丁場のシーズン、慢心こそ最大の敵となる。</p>`},
+    {lab:'コラム ・ 中位混戦', t:`プレーオフ圏を巡る大混戦`, b:
+      `<p>上位8の椅子を争うボーダーライン上の攻防が、いよいよ熱を帯びてきた。${cut?`現在8位${cut.name}（勝点${cut.P}）と`:''}${out?`9位${out.name}（勝点${out.P}）の差はわずか${Math.max(0,(cut?cut.P:0)-(out?out.P:0))}点。`:''}まさに紙一重だ。</p>`+
+      `<p>残り試合での一つの取りこぼしが、そのまま圏外転落につながりかねない。${pick(['ここからは負けられない総力戦が続く','どのクラブにもまだ十分にチャンスがある','監督の采配とベンチワークが順位を分ける'])}。観る者を引き込む終盤戦になりそうだ。</p>`},
+    {lab:'コラム ・ 戦力分析', t:`攻撃の${byAtk[0].name}、守備の${byDef[0].name}`, b:
+      `<p>得点力でリーグ最高を誇るのが${byAtk[0].name}（総得点${byAtk[0].PF}）。対照的に、最少失点で鉄壁を誇るのが${byDef[0].name}（総失点${byDef[0].PA}）だ。攻と守、両極のスタイルが好対照をなしている。</p>`+
+      `<p>${pick(['矛と盾、はたしてどちらが勝るのか','派手な撃ち合いか、堅実な守りか','理想は攻守の両立だが、現実は一筋縄ではいかない'])}。両者が直接ぶつかる一戦は、今季屈指の好カードとして記憶されるだろう。</p>`},
+    {lab:'コラム ・ 台風の目', t:`${surprise.name}、下馬評を覆す快進撃`, b:
+      `<p>開幕前の予想を鮮やかに覆しているのが${surprise.name}だ。本紙の戦力予想${pr[surprise.idx]+1}位に対し、現在は堂々の${ar[surprise.idx]+1}位。${npStreakPhrase(surprise.idx)||'安定した戦いぶり'}で、上位陣を脅かす存在となっている。</p>`+
+      `<p>躍進の理由を関係者は${pick(['「無名だった若手の覚醒」','「補強の的中」','「戦術が見事にハマったこと」','「チームの一体感」'])}と語る。この勢いが本物か、それとも一時のものか。今後の上位対決が真価を問う試金石となる。</p>`},
+    {lab:'コラム ・ 苦境', t:`${slump.name}、立て直しなるか`, b:
+      `<p>事前の期待を裏切る位置に沈むのが${slump.name}。本紙予想${pr[slump.idx]+1}位から現在${ar[slump.idx]+1}位へと後退している。${npStreakPhrase(slump.idx)?`<b>${npStreakPhrase(slump.idx)}</b>と、`:''}流れを引き寄せられずにいる。</p>`+
+      `<p>不振の要因として${pick(['主力の不調','けが人の続出','戦術の手詰まり','守備の崩壊'])}が囁かれる。だがシーズンはまだ長い。${pick(['一つの勝利が流れを変える','地力は十分にある','ここからの巻き返しに期待したい'])}。指揮官の手腕が問われる正念場だ。</p>`},
+    {lab:'コラム ・ 最下位脱出', t:`${last.name}に再建の道筋は`, b:
+      `<p>最下位に低迷する${last.name}。順位表だけを見れば厳しい現実だが、悲観する必要は必ずしもない。${pick(['若い世代に光るものがある','ベテランの経験値は何物にも代えがたい財産だ','ドラフト上位指名権という未来への希望がある'])}からだ。</p>`+
+      `<p>次のオフシーズン、移籍市場とドラフトでの動き次第では、一気に浮上する余地も残されている。問われているのは目先の結果より、フロントの長期的なビジョンと我慢強さだろう。</p>`},
   ];
   const c=pick(topics);
-  return {kind:'article',lab:'コラム ・ 論説',title:c.t,byline:npBy(),html:c.b+`<div class="np-quote">「${pick(['勝負はこれからだ','シーズンは長い','勢いこそが全て','細部が勝敗を分ける','栄光は準備した者に訪れる'])}」── 関係者談</div>`};
+  return {kind:'article',lab:c.lab,title:c.t,byline:npBy(),html:c.b+npQuote()};
+}
+/* 2本目の分析コラム（データ視点） */
+function npAnalysis(tbl){
+  const {sc,ca}=npLeagueLeaders();const opts=[];
+  if(sc[0])opts.push({lab:'データ室 ・ 得点', t:`得点王争い、${sc[0].p.name}が先頭`, b:
+    `<p>${sc[0].p.season.goals}ゴールでランキング首位を快走する${sc[0].p.name}（${G.clubs[sc[0].club.idx].name}）。${sc[1]?`2位${sc[1].p.name}（${sc[1].p.season.goals}G）を引き離しにかかる。`:'追随を許さない決定力だ。'}</p>`+
+    `<p>${pick(['シーカー頼みにしない自力での得点が光る','チェイサー陣の連係から量産する','プレッシャー下でも沈着冷静にゴールを重ねる'])}。このペースを維持すれば、得点王とMVPの同時戴冠も現実味を帯びてくる。</p>`});
+  if(ca[0])opts.push({lab:'データ室 ・ シーカー', t:`スニッチ捕獲の名手、${ca[0].p.name}`, b:
+    `<p>勝敗を直接左右する150点のスニッチ。その捕獲数でリーグをリードするのが${ca[0].p.name}（${G.clubs[ca[0].club.idx].name}）だ。一瞬の勝負を制する集中力が際立つ。</p>`+
+    `<p>${pick(['「探索」か「マーク」か、その駆け引きを制している','相手シーカーとの心理戦で上回る','終盤の勝負所での強さが光る'])}。シーカーの質が、そのままチームの浮沈に直結する時代だ。</p>`});
+  opts.push({lab:'データ室 ・ 戦評', t:`数字で読む今節`, b:
+    `<p>今節も各地で熱戦が繰り広げられた。${pick(['実力が拮抗するリーグでは、わずかな隙が勝敗を分ける','下位が上位を喰う番狂わせも珍しくない','ホームの利を生かしたクラブが白星を伸ばした'])}。</p>`+
+    `<p>${pick(['僅差の試合がリーグ全体で増えている','戦術の多様化が接戦を生んでいる','どのクラブにも勝機がある、それが今季の醍醐味だ'])}。順位表の行方から、ますます目が離せない。</p>`});
+  const a=pick(opts);
+  return {kind:'article',lab:a.lab,title:a.t,byline:npBy(),html:a.b};
 }
 function npUserFocus(){
   const me=G.clubs[G.user];const tbl=standings();const pos=tbl.findIndex(c=>c.idx===G.user)+1;
+  const streak=npStreakPhrase(G.user);
+  const f=clubForm(G.user,5).reverse().map(r=>r==='W'?'勝':r==='L'?'敗':'分').join('');
   let last=null;for(let r=G.results.length-1;r>=0;r--){const arr=G.results[r];if(!arr)continue;const m=arr.find(x=>x.h===G.user||x.a===G.user);if(m){last=m;break;}}
-  let body=`<p>${me.name}は現在リーグ<b>${pos}位</b>。`;
-  if(last){const isH=last.h===G.user;const gf=isH?last.hs:last.as,ga=isH?last.as:last.hs;body+=`直近の一戦は ${gf}–${ga} で${gf>ga?'勝利':gf<ga?'惜敗':'引き分け'}だった。`;}
-  const fx=G.schedule[G.round+1];const nx=fx&&fx.find(([h,a])=>h===G.user||a===G.user);
-  if(nx){const opp=G.clubs[nx[0]===G.user?nx[1]:nx[0]];body+=`次節は${opp.name}との対戦が控える。`;}
-  const inj=me.squad.find(p=>p.inj>0);
-  if(inj)body+=`負傷の${inj.name}の状態が鍵を握りそうだ。`;
+  let body=`<p>${me.name}は現在リーグ<b>${pos}位</b>（勝点${me.P}・${me.W}勝${me.D}分${me.L}敗）。${streak?`<b>${streak}</b>と、`:''}`;
+  if(last){const isH=last.h===G.user;const gf=isH?last.hs:last.as,ga=isH?last.as:last.hs;body+=`直近の一戦は ${gf}–${ga} で${gf>ga?'勝利を収めた':gf<ga?'惜敗を喫した':'引き分けに終わった'}。`;}
+  if(f)body+=`ここ5試合は「${f}」。`;
   body+=`</p>`;
-  return {kind:'article',lab:'クラブ密着',title:`${me.name} 番記者ノート`,byline:npBy(),html:body};
+  const byAtk=[...G.clubs].sort((a,b)=>b.PF-a.PF),byDef=[...G.clubs].sort((a,b)=>a.PA-b.PA);
+  const atkRank=byAtk.findIndex(c=>c.idx===G.user)+1, defRank=byDef.findIndex(c=>c.idx===G.user)+1;
+  body+=`<p>チーム成績は<b>攻撃力リーグ${atkRank}位</b>（総得点${me.PF}）、<b>守備力${defRank}位</b>（総失点${me.PA}）。${atkRank<=defRank?'攻撃で押し切るスタイルが持ち味だ。':'堅守をベースに勝点を積む。'}`;
+  const fx=G.schedule[G.round+1];const nx=fx&&fx.find(([h,a])=>h===G.user||a===G.user);
+  if(nx){const oppIdx=nx[0]===G.user?nx[1]:nx[0];const opp=G.clubs[oppIdx];const oppPos=tbl.findIndex(c=>c.idx===oppIdx)+1;
+    body+=`次節の相手 ${opp.name} は${oppPos}位。${oppPos<pos?'格上との一戦は上位浮上の絶好機。':oppPos>pos?'確実に勝点を奪いたい相手だ。':'順位の近いライバルとの直接対決となる。'}`;}
+  const inj=me.squad.find(p=>p.inj>0);
+  if(inj)body+=`負傷中の${inj.name}（${inj.injType||'負傷'}・残り約${inj.inj}節）の穴をどう埋めるかも、采配の見どころだ。`;
+  body+=`</p>`;
+  return {kind:'article',lab:'クラブ密着 ・ 番記者ノート',title:`${me.name} 戦記`,byline:npBy(),html:body};
 }
 function npGossip(){
   const clubs=G.clubs;const a=pick(clubs),b=pick(clubs.filter(c=>c!==a));
@@ -2771,6 +2826,7 @@ function generateProphet(){
   if(ca.length)sections.push({kind:'box',title:'スニッチ捕獲',html:ca.map(x=>npPlayerLine(x,`${x.p.season.catches}回`)).join('')});
   if(wk>=4){const ar=awardRace();sections.push({kind:'box',title:'アワードレース（MVP予想）',html:ar.mvp.map(x=>npPlayerLine(x,`${overall(x.p)}`)).join('')+`<div class="tiny muted" style="margin-top:6px">最優秀OF: ${ar.off[0]?ar.off[0].p.name:'-'}／最優秀DF: ${ar.def[0]?ar.def[0].p.name:'-'}</div>`});}
   sections.push(npColumn(tbl));
+  sections.push(npAnalysis(tbl));
   sections.push(npUserFocus());
   // 今週の注目の若手（ドラフト候補から）
   const pros=(G.prospects||[]).slice().sort((a,b)=>b.potential-a.potential);
