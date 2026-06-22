@@ -1868,6 +1868,24 @@ function quickSave(){try{localStorage.setItem(SAVE_KEY,saveToString());flash("�
 function quickLoad(){try{const s=localStorage.getItem(SAVE_KEY);if(!s){flash("クイックセーブが見つかりません。");return;}loadFromString(s);}catch(e){flash("読込に失敗しました。");}}
 function autoSave(){try{if(G)localStorage.setItem(SAVE_KEY,saveToString());}catch(e){}}
 function hasSave(){try{return !!localStorage.getItem(SAVE_KEY);}catch(e){return false;}}
+/* セーブデータの削除（クイックセーブ＋自動保存＋セーブ一覧をすべて消去）。2回押しで確定 */
+let _wipeArm=false,_wipeTimer=null;
+function wipeSave(){
+  if(!_wipeArm){
+    _wipeArm=true;
+    flash("⚠ もう一度「セーブデータを削除」を押すと、全セーブ（クイックセーブ・自動保存・セーブ一覧）を削除します。");
+    if(_wipeTimer)clearTimeout(_wipeTimer);
+    _wipeTimer=setTimeout(()=>{_wipeArm=false;},5000);
+    return;
+  }
+  _wipeArm=false;if(_wipeTimer){clearTimeout(_wipeTimer);_wipeTimer=null;}
+  try{
+    (typeof listSlots==='function'?listSlots():[]).forEach(s=>{try{localStorage.removeItem(slotDataKey(s.id));}catch(e){}});
+    localStorage.removeItem(SLOTS_KEY);
+    localStorage.removeItem(SAVE_KEY);
+  }catch(e){}
+  flash("全セーブデータを削除しました。ページを再読み込みすると最初の画面（新規ゲーム）に戻ります。");
+}
 
 /* ----- named save slots (browser) + list UI ----- */
 const SLOTS_KEY="quidditch_slots_v1";
@@ -2102,9 +2120,10 @@ function renderDashboard(){
         <button class="btn" id="openSlots">📂 セーブ一覧</button>
         <button class="btn" id="quickSave">⚡ クイックセーブ</button>
         <button class="btn ghost" id="quickLoad">↩ クイックロード</button>
+        <button class="btn danger" id="wipeSave">🗑 セーブデータを削除</button>
       </div>
       <input type="file" id="loadInput" accept=".json,application/json" style="display:none">
-      <p class="tiny muted" style="margin-top:10px">「ファイルに保存」はJSONを書き出します（どの環境でも確実・バックアップや共有に最適）。「クイックセーブ」はブラウザ内に保存し、各節終了時に自動保存もされます（このページを直接ブラウザで開いた場合に有効）。</p>
+      <p class="tiny muted" style="margin-top:10px">「ファイルに保存」はJSONを書き出します（どの環境でも確実・バックアップや共有に最適）。「クイックセーブ」はブラウザ内に保存し、各節終了時に自動保存もされます（このページを直接ブラウザで開いた場合に有効）。<br><b>「セーブデータを削除」</b>はブラウザ内の全セーブ（クイックセーブ・自動保存・セーブ一覧）を消去します（2回押しで確定・取り消し不可）。</p>
     </div>
   </div>`;
 }
@@ -3483,7 +3502,7 @@ function renderMatch(){
    ACTION BINDING (event delegation on document)
 ============================================================ */
 document.addEventListener("click",e=>{
-  const t=e.target.closest("[data-view],[data-train],[data-style],[data-formation],[data-tempo],[data-press],[data-beater],[data-seeker],[data-sign],[data-release],[data-detail],[data-rankcat],[data-rankpos],[data-rankmetric],[data-loadslot],[data-delslot],[data-delok],[data-tpartner],[data-tgive],[data-tget],[data-tcash],[data-acceptoffer],[data-declineoffer],[data-fxfilter],[data-draft],[data-prophet],[data-nparticle],[data-searchpos],[data-searchovr],[data-rosterclub],[data-rosterdetail],[data-result],[data-schedround],#rosterClose,#play,#poPlay,#playPre,#nextWeek,#toOffseason,#autoLu,#scout,#nextSeason,#toDraft,#closeDetail,#saveFile,#loadBtn,#quickSave,#quickLoad,#continueSave,#openSlots,#slotsClose,#slotsBackdrop,#slotSaveNew,#delCancel,#sendTrade");
+  const t=e.target.closest("[data-view],[data-train],[data-style],[data-formation],[data-tempo],[data-press],[data-beater],[data-seeker],[data-sign],[data-release],[data-detail],[data-rankcat],[data-rankpos],[data-rankmetric],[data-loadslot],[data-delslot],[data-delok],[data-tpartner],[data-tgive],[data-tget],[data-tcash],[data-acceptoffer],[data-declineoffer],[data-fxfilter],[data-draft],[data-prophet],[data-nparticle],[data-searchpos],[data-searchovr],[data-rosterclub],[data-rosterdetail],[data-result],[data-schedround],#rosterClose,#play,#poPlay,#playPre,#nextWeek,#toOffseason,#autoLu,#scout,#nextSeason,#toDraft,#closeDetail,#saveFile,#loadBtn,#quickSave,#quickLoad,#wipeSave,#continueSave,#openSlots,#slotsClose,#slotsBackdrop,#slotSaveNew,#delCancel,#sendTrade");
   if(!t)return;
   if(t.dataset.tpartner){G.trade.partner=+t.dataset.tpartner;G.trade.get=[];render();return;}
   if(t.dataset.tgive){const id=+t.dataset.tgive;G.trade.give=G.trade.give.includes(id)?G.trade.give.filter(x=>x!==id):[...G.trade.give,id];render();return;}
@@ -3504,6 +3523,7 @@ document.addEventListener("click",e=>{
   if(t.id==="loadBtn"){const fi=document.getElementById("loadInput");if(fi)fi.click();return;}
   if(t.id==="quickSave"){quickSave();return;}
   if(t.id==="quickLoad"){quickLoad();return;}
+  if(t.id==="wipeSave"){wipeSave();return;}
   if(t.id==="continueSave"){quickLoad();return;}
   if(t.dataset.rankcat){G.rankCat=t.dataset.rankcat;render();return;}
   if(t.dataset.rankpos){G.rankPos=t.dataset.rankpos;render();return;}
