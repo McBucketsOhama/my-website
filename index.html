@@ -1616,6 +1616,14 @@ function executeTrade(pi,give,get,cash){
   const gn=givePlayers.map(p=>p.name).join("・")||"（なし）";
   const rn=getPlayers.map(p=>p.name).join("・")||"（なし）";
   pushNews("🤝",`${partner.name} とトレード成立: OUT ${gn}${cash?` +${gold(cash)}`:""} ／ IN ${rn}。`);
+  logTrade(me.name,partner.name,gn+(cash?` +${gold(cash)}`:''),getPlayers[0]?POS[getPlayers[0].pos].short:'',rn,givePlayers[0]?POS[givePlayers[0].pos].short:'');
+}
+/* 新聞用のトレード記録 */
+function logTrade(aName,bName,paName,paPos,pbName,pbPos){
+  G.tradeLog=G.tradeLog||[];
+  const wk=(typeof calWeek==='function'&&G.week!=null&&calWeek()&&calWeek().round!=null)?calWeek().round+1:0;
+  G.tradeLog.unshift({a:aName,b:bName,paName,paPos,pbName,pbPos,season:G.seasonNo,wk});
+  if(G.tradeLog.length>40)G.tradeLog.pop();
 }
 /* トレードデッドライン = バイウィーク（1月第2週）。以降はプレーオフ終了まで取引不可、オフシーズンに再開 */
 function tradeDeadlineWeek(){return calIndex('bye');}
@@ -1683,6 +1691,7 @@ function acceptOffer(oid){
   repairLineup(me);
   pushNews("🤝",`オファー受諾: ${give.name}${o.cash?` ＋${gold(o.cash)}`:""} を獲得、${want.name} を放出（${partner.name}）。`);
   G.offers=G.offers.filter(x=>x.id!==oid);
+  logTrade(me.name,partner.name,give.name,POS[give.pos].short,want.name,POS[want.pos].short);
   render();
 }
 function declineOffer(oid){G.offers=(G.offers||[]).filter(x=>x.id!==oid);pushNews("🙅","トレードオファーを辞退しました。");render();}
@@ -1723,6 +1732,7 @@ function executeAiTrade(A,B,pa,pb){
   B.squad=B.squad.filter(p=>p.id!==pb.id);
   A.squad.push(pb);B.squad.push(pa);
   pushNews('🔄',`トレード成立: ${A.name} ⇄ ${B.name} ── ${pa.name}（${POS[pa.pos].short}・OVR${overall(pa)}）と ${pb.name}（${POS[pb.pos].short}・OVR${overall(pb)}）が交換。`);
+  logTrade(A.name,B.name,`${pa.name}（OVR${overall(pa)}）`,POS[pa.pos].short,`${pb.name}（OVR${overall(pb)}）`,POS[pb.pos].short);
 }
 function aiTradeRound(){
   if(!tradeOpen())return;            // トレード期限内のみ
@@ -2850,6 +2860,62 @@ function npGossip(){
   ];
   return {kind:'article',lab:'独占 ・ ゴシップ',title:'リータ・スキーターの羽根ペン',byline:'リータ・スキーター',html:`<p>${pick(rumors)} ${pick(['続報を待たれたい。','読者諸君の判断に委ねよう。','私の羽根ペンは真実だけを記す。','さて、真相やいかに。'])}</p>`};
 }
+/* 移籍情報（合意トレード＋噂） */
+function npTradeReport(){
+  const recent=(G.tradeLog||[]).filter(t=>t.season===G.seasonNo).slice(0,5);
+  let body='';
+  if(recent.length){
+    body+=`<p>移籍市場が動いた。今季成立した主なトレードを振り返る。</p>`+recent.map(t=>`<p style="margin:4px 0">▪ <b>${t.a} ⇄ ${t.b}</b>：${t.paName}（${t.paPos}）⇄ ${t.pbName}（${t.pbPos}）</p>`).join('');
+  } else {
+    body+=`<p>今のところ大きなトレードは成立していないが、水面下では各クラブのフロントが情報戦を繰り広げている。</p>`;
+  }
+  const a=pick(G.clubs),b=pick(G.clubs.filter(c=>c!==a));
+  const dl=tradeOpen()?'デッドラインまでの各クラブの動向に注目が集まる。':'取引はシーズン終了後（オフシーズン）の再開を待つことになる。';
+  body+=`<p><b>【噂】</b>${pick([`${a.name}が${b.name}の主力獲得に動いているとの情報を掴んだ。`,`${a.name}が手薄なポジションの補強を検討しているという。`,`${b.name}が若手とベテランの交換トレードを模索しているとささやかれる。`,`複数のクラブが${a.name}の控え選手に関心を示しているもようだ。`])}${dl}</p>`;
+  return {kind:'article',lab:'移籍情報 ・ トレード',title:'トレード市場の最新事情',byline:npBy(),html:body};
+}
+/* ジニー・ウィーズリー記者: 今週の注目試合 */
+function npGinnyPickup(res,tbl){
+  if(!res||!res.length)return null;
+  const rankOf={};tbl.forEach((c,i)=>rankOf[c.idx]=i);const N=G.clubs.length;
+  let best=null,score=-1;
+  res.forEach(m=>{
+    const margin=Math.abs(m.hs-m.as);
+    const topness=(N-rankOf[m.h])+(N-rankOf[m.a]);
+    const s=topness*3+Math.max(0,200-margin)/10+((m.h===G.user||m.a===G.user)?15:0);
+    if(s>score){score=s;best=m;}
+  });
+  if(!best)return null;
+  const hn=G.clubs[best.h].name,an=G.clubs[best.a].name;
+  const hw=best.hs>best.as,draw=best.hs===best.as;const wn=hw?hn:an,ln=hw?an:hn;
+  const ws=Math.max(best.hs,best.as),ls=Math.min(best.hs,best.as);
+  const body=`<p>今週、私ジニー・ウィーズリーが選ぶ注目の一戦は <b>${hn} 対 ${an}</b>（${best.hs}–${best.as}）。${draw?'最後までもつれた、痺れる引き分けだった':`${wn}が${ln}を退けた`}。</p>`+
+    `<p>${pick(['序盤からテンポの速い、見ごたえのある攻防が続いた','両軍のチェイサーが意地をぶつけ合った','スニッチをめぐる駆け引きが観客を惹きつけた','ビーターの激しいブラッジャー合戦が試合を彩った'])}。${(ws-ls>=160)?'勝負を分けたのは、やはりスニッチ捕獲だった。':'クアッフルの精度が、そのまま明暗を分けた。'}</p>`+
+    `<p>${pick([`${wn}はこの勢いを次節以降にもつなげたい。`,`${ln}にとっては悔しい一戦。だが内容は決して悪くなかった。`,`両クラブのファンにとって、記憶に残る90分となった。`])}元選手として、こうした熱戦を取材できるのは何よりの喜びだ。</p>`;
+  return {kind:'article',lab:'ジニーの注目試合',title:`今週のピックアップ ── ${hn} ${best.hs}–${best.as} ${an}`,byline:'ジニー・ウィーズリー',html:body};
+}
+/* ジニー・ウィーズリー記者: 選手特集 */
+function npGinnyFeature(){
+  const pool=allPlayers().filter(x=>x.p.season&&x.p.season.gp>0);
+  if(!pool.length)return null;
+  const angle=pick(['scorer','young','veteran','keeper']);
+  let subj=null,theme=angle;
+  if(angle==='scorer')subj=pool.slice().sort((a,b)=>b.p.season.goals-a.p.season.goals)[0];
+  else if(angle==='young')subj=pool.filter(x=>x.p.age<=22).sort((a,b)=>overall(b.p)-overall(a.p))[0];
+  else if(angle==='veteran')subj=pool.filter(x=>x.p.age>=30).sort((a,b)=>overall(b.p)-overall(a.p))[0];
+  else subj=pool.filter(x=>x.p.pos==='KE').sort((a,b)=>overall(b.p)-overall(a.p))[0];
+  if(!subj){subj=pool.slice().sort((a,b)=>overall(b.p)-overall(a.p))[0];theme='scorer';}
+  const p=subj.p,club=G.clubs[subj.club.idx];
+  const intro=`<p>本紙の選手特集、今週の主役は ${flag(p.nat)} <b>${p.name}</b>（${p.age}歳・${POS[p.pos].name}・${club.name}）。OVR${overall(p)}を誇る、${theme==='young'?'次代を担う逸材':theme==='veteran'?'円熟のベテラン':theme==='keeper'?'信頼の守護神':'リーグ屈指の実力者'}だ。</p>`;
+  const mid={
+    scorer:`<p>今季ここまで${p.season.goals}ゴール。${pick(['その決定力はリーグ随一','勝負所での集中力が光る','チームの攻撃を一身に背負う'])}。${pick(['得点感覚は天性のもの','日々の鍛錬がこの数字を支えている'])}と、私の目には映る。</p>`,
+    young:`<p>${p.age}歳の若さで主力に定着。潜在能力${p.potential}が示す通り、伸びしろは計り知れない。${pick(['数年後にはリーグを代表する選手になっているだろう','大舞台での経験を積めば、さらに大きく羽ばたくはずだ'])}。</p>`,
+    veteran:`<p>${p.age}歳、全盛期から円熟期へ。${pick(['経験に裏打ちされた判断力でチームを導く','若手の手本となる存在だ','勝負どころでの落ち着きは年齢の賜物だ'])}。${pick(['まだまだ第一線で輝き続ける','その背中が後進を育てている'])}。</p>`,
+    keeper:`<p>最後尾からチームを支える守護神。${pick(['そのセービングが幾度となくチームを救ってきた','冷静沈着な守りが勝点の土台だ','一対一の強さは圧巻だ'])}。${p.season.gp}試合での働きは数字以上の価値がある。</p>`,
+  }[theme];
+  const out=`<p>${pick(['取材を通して感じたのは、その人柄の良さだった。','プレーだけでなく、その姿勢にも学ぶことが多い。','こうした選手こそ、クィディッチの未来を明るく照らす。'])}今後の活躍からも、目が離せない。── ジニー・ウィーズリー</p>`;
+  return {kind:'article',lab:'選手特集',title:`選手特集 ── ${p.name}`,byline:'ジニー・ウィーズリー',html:intro+(mid||'')+out};
+}
 
 function generateProphet(){
   const wk=G.round+1;const res=G.results[G.round]||[];
@@ -2877,6 +2943,9 @@ function generateProphet(){
   if(wk>=4){const ar=awardRace();sections.push({kind:'box',title:'アワードレース（MVP予想）',html:ar.mvp.map(x=>npPlayerLine(x,`${overall(x.p)}`)).join('')+`<div class="tiny muted" style="margin-top:6px">最優秀OF: ${ar.off[0]?ar.off[0].p.name:'-'}／最優秀DF: ${ar.def[0]?ar.def[0].p.name:'-'}</div>`});}
   sections.push(npColumn(tbl));
   sections.push(npAnalysis(tbl));
+  const gp=npGinnyPickup(res,tbl);if(gp)sections.push(gp);
+  const gf=npGinnyFeature();if(gf)sections.push(gf);
+  sections.push(npTradeReport());
   sections.push(npUserFocus());
   // 今週の注目の若手（ドラフト候補から）
   const pros=(G.prospects||[]).slice().sort((a,b)=>b.potential-a.potential);
@@ -2936,10 +3005,16 @@ const NP_CSS=`<style>
 .np-row{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;padding:3px 0;border-bottom:1px dashed var(--line)}
 .np-cols{column-count:2;column-gap:24px}
 @media(max-width:680px){.np-cols{column-count:1}.np-titl{font-size:25px}}
-.np-art{break-inside:avoid;border-top:2px solid var(--line2);padding:12px 0 6px;margin-bottom:6px}
-.np-art h3{font-family:Georgia,serif;font-size:17px;margin:4px 0 5px;line-height:1.3;color:var(--ink)}
+.np-art{border-top:2px solid var(--line2);padding:11px 0 8px;margin-bottom:2px}
+.np-art h3{font-family:Georgia,serif;font-size:17px;margin:4px 0 5px;line-height:1.3;color:var(--ink);display:flex;justify-content:space-between;align-items:baseline;gap:10px}
 .np-art p{line-height:1.7;font-size:13px;margin:6px 0;color:var(--ink)}
 .np-quote{font-family:Georgia,serif;font-style:italic;font-size:14px;color:var(--muted);border-left:3px solid var(--gold-soft);padding-left:12px;margin:10px 0}
+.np-head{cursor:pointer}
+.np-head:hover h3{color:var(--gold)}
+.np-toggle{flex:0 0 auto;color:var(--gold);font-weight:800;font-size:18px;line-height:1}
+.np-teaser{font-size:12px;color:var(--muted);margin:4px 0 0}
+.np-full{margin-top:6px;border-top:1px dashed var(--line);padding-top:6px;animation:npfade .2s ease}
+@keyframes npfade{from{opacity:0}to{opacity:1}}
 </style>`;
 function renderProphet(){
   const issues=G.prophet||[];
@@ -2952,7 +3027,20 @@ function renderProphet(){
   const dateline=L.type==='preseason'?'開幕前特別号':L.type==='draft'?'ドラフト特集号':`第${L.wk}節`;
   const leadHtml=lead?`<div class="np-lead"><div class="lab">${lead.lab||'トップ記事'}</div><h2>${lead.title}</h2><div class="np-byline">本紙 ${lead.byline||npBy()} 記者</div><div class="np-drop">${lead.html}</div></div>`:'';
   const boxHtml=boxes.length?`<div class="np-boxes">${boxes.map(b=>`<div class="np-box"><div class="bt">${b.title}</div>${b.html}</div>`).join('')}</div>`:'';
-  const artHtml=arts.length?`<div class="np-cols">${arts.map(a=>`<div class="np-art"><div class="lab">${a.lab||''}</div><h3>${a.title}</h3>${a.byline?`<div class="np-byline">本紙 ${a.byline} 記者</div>`:''}<div>${a.html}</div></div>`).join('')}</div>`:'';
+  const open=(G.npOpen==null?-1:G.npOpen);
+  const artHtml=arts.length?`<div class="np-list">${arts.map((a,i)=>{
+    const isOpen=open===i;
+    const teaser=a.html.replace(/<[^>]+>/g,'').slice(0,64);
+    return `<div class="np-art ${isOpen?'open':''}">
+      <div class="np-head" data-nparticle="${i}">
+        <div class="lab">${a.lab||''}</div>
+        <h3><span>${a.title}</span><span class="np-toggle">${isOpen?'−':'＋'}</span></h3>
+        ${a.byline?`<div class="np-byline">本紙 ${a.byline} 記者</div>`:''}
+        ${isOpen?'':`<p class="np-teaser">${teaser}… <span class="gold">見出しを押して全文を読む ▸</span></p>`}
+      </div>
+      ${isOpen?`<div class="np-full">${a.html}</div>`:''}
+    </div>`;
+  }).join('')}</div>`:'';
   const back=issues.map((is,i)=>`<button class="btn sm ${i===sel?'gold':'ghost'}" data-prophet="${i}">${is.type==='preseason'?'開幕前':is.type==='draft'?'ドラフト':'第'+is.wk+'節'} <span class="tiny muted">S${is.season}</span></button>`).join('');
   return `${NP_CSS}<p class="eyebrow">日刊預言者新聞 ・ クィディッチ欄</p>
   <div class="np-paper">
@@ -3218,7 +3306,7 @@ function renderMatch(){
    ACTION BINDING (event delegation on document)
 ============================================================ */
 document.addEventListener("click",e=>{
-  const t=e.target.closest("[data-view],[data-train],[data-style],[data-formation],[data-tempo],[data-press],[data-beater],[data-seeker],[data-sign],[data-release],[data-detail],[data-rankcat],[data-rankpos],[data-rankmetric],[data-loadslot],[data-delslot],[data-delok],[data-tpartner],[data-tgive],[data-tget],[data-tcash],[data-acceptoffer],[data-declineoffer],[data-fxfilter],[data-draft],[data-prophet],[data-searchpos],[data-searchovr],#play,#poPlay,#playPre,#nextWeek,#toOffseason,#autoLu,#scout,#nextSeason,#toDraft,#closeDetail,#saveFile,#loadBtn,#quickSave,#quickLoad,#continueSave,#openSlots,#slotsClose,#slotsBackdrop,#slotSaveNew,#delCancel,#sendTrade");
+  const t=e.target.closest("[data-view],[data-train],[data-style],[data-formation],[data-tempo],[data-press],[data-beater],[data-seeker],[data-sign],[data-release],[data-detail],[data-rankcat],[data-rankpos],[data-rankmetric],[data-loadslot],[data-delslot],[data-delok],[data-tpartner],[data-tgive],[data-tget],[data-tcash],[data-acceptoffer],[data-declineoffer],[data-fxfilter],[data-draft],[data-prophet],[data-nparticle],[data-searchpos],[data-searchovr],#play,#poPlay,#playPre,#nextWeek,#toOffseason,#autoLu,#scout,#nextSeason,#toDraft,#closeDetail,#saveFile,#loadBtn,#quickSave,#quickLoad,#continueSave,#openSlots,#slotsClose,#slotsBackdrop,#slotSaveNew,#delCancel,#sendTrade");
   if(!t)return;
   if(t.dataset.tpartner){G.trade.partner=+t.dataset.tpartner;G.trade.get=[];render();return;}
   if(t.dataset.tgive){const id=+t.dataset.tgive;G.trade.give=G.trade.give.includes(id)?G.trade.give.filter(x=>x!==id):[...G.trade.give,id];render();return;}
@@ -3253,7 +3341,8 @@ document.addEventListener("click",e=>{
   if(t.id==="playPre"){startPreseasonMatch();return;}
   if(t.id==="toOffseason"){G.week=calIndex('combine');G.phase='offseason';G.view='dashboard';render();return;}
   if(t.dataset.draft){draftPick(+t.dataset.draft);return;}
-  if(t.dataset.prophet){G.prophetSel=+t.dataset.prophet;G.view="prophet";render();return;}
+  if(t.dataset.prophet){G.prophetSel=+t.dataset.prophet;G.npOpen=null;G.view="prophet";render();return;}
+  if(t.dataset.nparticle!==undefined){const i=+t.dataset.nparticle;G.npOpen=(G.npOpen===i?null:i);render();return;}
   if(t.dataset.searchpos!==undefined){G.search=G.search||{};G.search.pos=t.dataset.searchpos;render();return;}
   if(t.dataset.searchovr!==undefined){G.search=G.search||{};G.search.minOvr=+t.dataset.searchovr;render();return;}
   if(t.id==="closeDetail"){_detailId=null;render();return;}
