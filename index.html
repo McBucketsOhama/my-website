@@ -2957,7 +2957,8 @@ function renderAwards(){
 
 /* ---- 日刊預言者新聞・クィディッチ欄 ---- */
 /* ===== 日刊預言者新聞（拡張版） ===== */
-const NP_COLUMNISTS=["リータ・スキーター","B・バグショット","G・オリバンダー","X・ラブグッド","I・ピンス","C・ワーベック","D・キャトモア"];
+/* 通常記事の署名（リータ・スキーターは含めない＝ゴシップの飛ばし記事専属） */
+const NP_COLUMNISTS=["B・バグショット","G・オリバンダー","X・ラブグッド","I・ピンス","C・ワーベック","D・キャトモア","M・トラヴァース","P・ウィークス"];
 function npBy(){return pick(NP_COLUMNISTS);}
 function clubStrength(c){const ps=lineupPlayers(c,bestLineup(c));return ps.length?ps.reduce((s,p)=>s+overall(p),0)/ps.length:50;}
 function predictedTable(){return G.clubs.slice().sort((a,b)=>clubStrength(b)-clubStrength(a));}
