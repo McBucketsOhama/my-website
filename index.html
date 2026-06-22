@@ -742,6 +742,39 @@ const FILLER_NATS=["日本","アメリカ","ブラジル","スペイン","フラ
 function randNat(){return pick(FILLER_NATS);}
 function flag(nat){return `<svg viewBox="0 0 30 20" width="18" height="12" style="vertical-align:-2px;border-radius:2px;box-shadow:0 0 0 1px rgba(255,255,255,.12)">${flagPaint(nat)}</svg>`;}
 const PLAN={CH:5,BE:3,KE:2,SE:2};
+/* 開始時ロスター（Quidditch.xlsx 由来・実データ。p=表示位置, c=クラブ, ovr/pot/ir, 各能力, g=成長スピード） */
+const POS_KEY={GK:'KE',BT:'BE',CH:'CH',SK:'SE'};
+const XLSX_PLAYERS=[
+  {p:'GK',n:'ブランチフラワー',c:'パドルミアユナイテッド',nat:'アメリカ',age:33,g:'晩期',ovr:85,pot:87,ir:86,att:88,def:92,spd:72,tec:92,sta:89,men:78},
+  {p:'GK',n:'トドロキ',c:'タッツヒルトルネードーズ',nat:'日本',age:27,g:'普通',ovr:88,pot:92,ir:93,att:82,def:96,spd:79,tec:97,sta:95,men:80},
+  {p:'GK',n:'アルメイダ',c:'ファルマス ファルコンズ',nat:'ブラジル',age:22,g:'早熟',ovr:86,pot:94,ir:80,att:98,def:86,spd:80,tec:89,sta:79,men:81},
+  {p:'GK',n:'ワング',c:'アップルビーアローズ',nat:'ノルウェー',age:28,g:'普通',ovr:82,pot:87,ir:99,att:89,def:84,spd:75,tec:84,sta:82,men:81},
+  {p:'GK',n:'パライゾン',c:'チャドリー キャノンズ',nat:'ハイチ',age:30,g:'晩期',ovr:83,pot:85,ir:89,att:81,def:97,spd:69,tec:90,sta:79,men:80},
+  {p:'GK',n:'ズドラフコ',c:'ヨークシャー ダガーズ',nat:'ブルガリア',age:29,g:'普通',ovr:84,pot:88,ir:95,att:86,def:90,spd:73,tec:87,sta:84,men:84},
+  {p:'GK',n:'ウッド',c:'パドルミアユナイテッド',nat:'イングランド',age:38,g:'普通',ovr:79,pot:79,ir:82,att:74,def:76,spd:70,tec:83,sta:89,men:82},
+  {p:'BT',n:'オコイエ',c:'パドルミアユナイテッド',nat:'ナイジェリア',age:28,g:'普通',ovr:86,pot:90,ir:85,att:96,def:82,spd:83,tec:87,sta:82,men:86},
+  {p:'BT',n:'オジュク',c:'ホリヘッドハッピーズ',nat:'ナイジェリア',age:26,g:'晩期',ovr:84,pot:94,ir:77,att:87,def:80,spd:91,tec:80,sta:95,men:72},
+  {p:'BT',n:'ホンゴウ',c:'ケアフィリー カタパルツ',nat:'日本',age:32,g:'普通',ovr:84,pot:86,ir:94,att:79,def:92,spd:88,tec:89,sta:83,men:76},
+  {p:'BT',n:'シンゴウ',c:'プライド オブ ポーツリー',nat:'日本',age:25,g:'普通',ovr:85,pot:92,ir:83,att:81,def:94,spd:79,tec:90,sta:85,men:80},
+  {p:'BT',n:'ブルチャノフ',c:'プライド オブ ポーツリー',nat:'ブルガリア',age:30,g:'普通',ovr:86,pot:87,ir:84,att:81,def:86,spd:94,tec:89,sta:84,men:79},
+  {p:'CH',n:'リュンデクバム',c:'パドルミアユナイテッド',nat:'ノルウェー',age:31,g:'普通',ovr:86,pot:87,ir:87,att:89,def:86,spd:84,tec:86,sta:83,men:90},
+  {p:'CH',n:'デンベレ',c:'タッツヒルトルネードーズ',nat:'コートジボワール',age:24,g:'普通',ovr:89,pot:98,ir:78,att:93,def:95,spd:97,tec:91,sta:78,men:82},
+  {p:'CH',n:'コワルスキー',c:'タッツヒルトルネードーズ',nat:'アメリカ',age:26,g:'普通',ovr:87,pot:90,ir:86,att:91,def:81,spd:92,tec:88,sta:87,men:83},
+  {p:'CH',n:'フローレス',c:'ケンメアーケストレルズ',nat:'ブラジル',age:22,g:'普通',ovr:85,pot:95,ir:91,att:85,def:79,spd:91,tec:90,sta:88,men:77},
+  {p:'CH',n:'ヴェンツェル',c:'モントローズマグパイズ',nat:'リヒテンシュタイン',age:29,g:'普通',ovr:84,pot:88,ir:82,att:72,def:87,spd:79,tec:82,sta:94,men:93},
+  {p:'CH',n:'フリック',c:'チャドリー キャノンズ',nat:'リヒテンシュタイン',age:27,g:'早熟',ovr:87,pot:89,ir:80,att:86,def:90,spd:81,tec:95,sta:83,men:89},
+  {p:'CH',n:'イリポト',c:'チャドリー キャノンズ',nat:'ハイチ',age:21,g:'早熟',ovr:84,pot:89,ir:85,att:84,def:82,spd:93,tec:84,sta:78,men:80},
+  {p:'CH',n:'アロンソ',c:'ケアフィリー カタパルツ',nat:'ブラジル',age:28,g:'晩期',ovr:87,pot:93,ir:92,att:87,def:86,spd:94,tec:84,sta:90,men:82},
+  {p:'CH',n:'ディアス',c:'ケアフィリー カタパルツ',nat:'ブラジル',age:31,g:'普通',ovr:90,pot:91,ir:94,att:86,def:88,spd:88,tec:92,sta:92,men:96},
+  {p:'CH',n:'ジャーニガン',c:'ヨークシャー ダガーズ',nat:'ウェールズ',age:30,g:'晩期',ovr:86,pot:89,ir:88,att:95,def:88,spd:81,tec:89,sta:82,men:78},
+  {p:'CH',n:'ゴンザレス',c:'バンコリー バンガーズ',nat:'アメリカ',age:30,g:'晩期',ovr:86,pot:88,ir:87,att:86,def:86,spd:87,tec:85,sta:88,men:87},
+  {p:'SK',n:'クリストファーセン',c:'パドルミアユナイテッド',nat:'ノルウェー',age:29,g:'晩期',ovr:87,pot:91,ir:96,att:81,def:96,spd:90,tec:90,sta:88,men:78},
+  {p:'SK',n:'ノリコ',c:'ホリヘッドハッピーズ',nat:'日本',age:27,g:'普通',ovr:90,pot:92,ir:89,att:93,def:82,spd:89,tec:92,sta:94,men:90},
+  {p:'SK',n:'エキアノ',c:'アップルビーアローズ',nat:'ナイジェリア',age:21,g:'早熟',ovr:85,pot:88,ir:86,att:92,def:79,spd:92,tec:88,sta:81,men:79},
+  {p:'SK',n:'ウォルフケ',c:'バリキャッスルバッツ',nat:'ポーランド',age:30,g:'晩期',ovr:84,pot:84,ir:88,att:95,def:80,spd:86,tec:82,sta:79,men:81},
+  {p:'SK',n:'シルバ',c:'タッツヒルトルネードーズ',nat:'ブラジル',age:24,g:'普通',ovr:89,pot:94,ir:84,att:86,def:90,spd:96,tec:92,sta:86,men:84},
+  {p:'SK',n:'スマックハマー',c:'ウィムボーン ワスプス',nat:'アメリカ',age:32,g:'晩期',ovr:88,pot:88,ir:92,att:85,def:92,spd:86,tec:90,sta:88,men:88},
+];
 
 /* ============================================================
    RNG / UTIL
@@ -839,21 +872,43 @@ function sumSalary(ids,club){return ids.reduce((s,id)=>{const p=getP(club,id);re
 function sumValue(ids,club){return ids.reduce((s,id)=>{const p=getP(club,id);return s+(p?playerValue(p):0);},0);}
 function ovrTier(o){return o>=88?"t1":o>=80?"t2":o>=72?"t3":o>=63?"t4":"t5";}
 
-/* 開幕時の戦力差を圧縮（平均へ寄せる）。COMPRESSを小さくするほど均衡 */
-const STR_MEAN=TEAMS.reduce((s,t)=>s+t.str,0)/TEAMS.length;
-const STR_COMPRESS=0.4;
-function balancedStr(str){return Math.round(STR_MEAN+(str-STR_MEAN)*STR_COMPRESS);}
+/* overall() が target になるよう全ステータスにオフセットを加える（重み和=1なので加算量だけoverallが動く） */
+function setOVR(p,target){
+  const d=target-overall(p);
+  if(d!==0)for(const k of ["att","def","spd","tec","sta","men"])p[k]=clamp(p[k]+d,25,99);
+  const ks=Object.keys(POS[p.pos].w);const key=ks.reduce((a,b)=>POS[p.pos].w[b]>POS[p.pos].w[a]?b:a);
+  let guard=24;
+  while(overall(p)<target&&guard-->0){if(p[key]>=99)break;p[key]=clamp(p[key]+1,25,99);}
+  guard=24;
+  while(overall(p)>target&&guard-->0){if(p[key]<=25)break;p[key]=clamp(p[key]-1,25,99);}
+}
+/* Excel由来の実選手を正確に再現（OVR/POT/年齢/国籍/能力を保持） */
+function makeXlsxPlayer(x){
+  const pos=POS_KEY[x.p];
+  const p={id:_pid++,name:x.n,pos,age:x.age,nat:x.nat,fem:isFemale(x.n),
+    att:x.att,def:x.def,spd:x.spd,tec:x.tec,sta:x.sta,men:x.men,
+    fitness:100,form:0,inj:0,injType:null,potential:Math.max(x.pot,1),value:0,star:true,
+    growth:x.g,injRes:x.ir,season:{gp:0,goals:0,catches:0}};
+  setOVR(p,x.ovr);                              // 表示OVRをExcel値に固定
+  p.potential=clamp(Math.max(x.pot,overall(p)),overall(p),99);
+  usedNames.add(p.name);
+  p.value=playerValue(p);p.years=ri(2,4);p.salary=contractSalary(p);
+  return p;
+}
+/* 自動生成の補充選手（OVR 68〜88） */
+function makeFiller(pos){
+  const target=ri(68,88);
+  const p=makePlayer(pos,target);
+  setOVR(p,target);
+  p.potential=clamp(Math.max(p.potential,overall(p)+ri(0,6)),overall(p),92);
+  p.growth=pick(["早熟","普通","普通","晩期"]);p.injRes=ri(60,95);
+  p.value=playerValue(p);p.salary=contractSalary(p);
+  return p;
+}
 function makeSquadFrom(team){
-  const sq=[];
-  const counts={CH:0,BE:0,KE:0,SE:0};
-  const bs=balancedStr(team.str);
-  (team.roster||[]).forEach(r=>{
-    sq.push(makePlayer(r.pos,bs,{name:r.name,nat:r.nat,bonus:ri(2,8)}));
-    counts[r.pos]++;
-  });
-  for(const pos in PLAN){
-    while(counts[pos]<PLAN[pos]){sq.push(makePlayer(pos,bs));counts[pos]++;}
-  }
+  const sq=[];const counts={CH:0,BE:0,KE:0,SE:0};
+  XLSX_PLAYERS.filter(x=>x.c===team.name).forEach(x=>{const p=makeXlsxPlayer(x);sq.push(p);counts[p.pos]++;}); // 実選手
+  for(const pos in PLAN){while(counts[pos]<PLAN[pos]){sq.push(makeFiller(pos));counts[pos]++;}}             // 補充(68-88)
   return sq;
 }
 
@@ -1244,8 +1299,11 @@ function weeklyDevelop(club,focus){
     const ks=Object.keys(POS[p.pos].w);
     const gap=p.potential-overall(p);
     const ageF = p.age<=20?1.0 : p.age<=23?0.72 : p.age<=26?0.42 : p.age<=29?0.20 : 0.05;
-    const up   = gap>0 ? clamp(0.05*ageF*(gap/8)*boost,0,0.26) : 0; // 若くポテンシャル差が大きいほど伸びやすい
-    const down = p.age>=33?0.06 : p.age>=30?0.03 : p.age>=28?0.01 : 0; // 高齢ほど衰えやすい
+    // 成長スピード: 早熟=若いうちに急成長・衰え早い / 晩期=遅咲きだが長く伸び衰え遅い
+    const gmul = p.growth==='早熟'?(p.age<=24?1.45:0.6) : p.growth==='晩期'?(p.age<=24?0.7:1.5) : 1;
+    const dmul = p.growth==='早熟'?1.4 : p.growth==='晩期'?0.6 : 1;
+    const up   = gap>0 ? clamp(0.05*ageF*(gap/8)*boost*gmul,0,0.32) : 0; // 若くポテンシャル差が大きいほど伸びやすい
+    const down = (p.age>=33?0.06 : p.age>=30?0.03 : p.age>=28?0.01 : 0)*dmul; // 高齢ほど衰えやすい
     if(rng()<up && overall(p)<p.potential){ks.forEach(k=>{if(p[k]<99)p[k]=clamp(p[k]+1,25,99);});}
     else if(rng()<down){ks.forEach(k=>{p[k]=clamp(p[k]-1,25,99);});}
     // 若手はシーズン中でもOVR/ポテンシャルが大幅に変わることがある
@@ -1287,8 +1345,9 @@ function applyMatchLoad(club,lu,lf){
     const staResist=clamp((p.sta||60)/100,0.3,1);
     const drain=(10+6*lf)*(1.25-staResist*0.6); // 出場で必ず消耗（基礎）＋長い試合で上乗せ、スタミナで軽減
     p.fitness=clamp(Math.round(((p.fitness||100)-drain)*10)/10,5,100); // 小数第1位まで（第2位以下を省略）
-    // 疲労が溜まる（体力が低い）ほど怪我のリスクが高い
-    const risk=clamp(0.012+0.06*(1-(p.fitness||100)/100)+0.015*lf,0.008,0.15);
+    // 疲労が溜まる（体力が低い）ほど怪我のリスクが高い。怪我耐性で増減
+    const irMul=clamp(1.55-(p.injRes||78)/70,0.45,1.4);
+    const risk=clamp((0.012+0.06*(1-(p.fitness||100)/100)+0.015*lf)*irMul,0.006,0.15);
     if(rng()<risk){
       const inj=rollInjury(); // 程度に応じて離脱週数が決まる
       p.inj=inj.weeks;p.injType=inj.type;
@@ -1497,7 +1556,10 @@ function offseasonDevelop(club){
     const gap=p.potential-overall(p);
     // オフシーズンは「大幅に」変動。若手はポテンシャル差で大きく伸び、高齢は大きく衰える
     let base = p.age<=21?ri(2,6) : p.age<=24?ri(1,4) : p.age<=27?ri(-1,3) : p.age<=30?ri(-3,1) : ri(-6,-1);
-    const bonus = (p.age<=24&&gap>0)?Math.min(gap,ri(0,4)):0;
+    let bonus = (p.age<=24&&gap>0)?Math.min(gap,ri(0,4)):0;
+    // 成長スピード反映: 早熟は若いうちに+・年取って-が大きい / 晩期は逆
+    if(p.growth==='早熟'){ if(p.age<=24)bonus+=ri(0,2); else if(p.age>=28)base-=1; }
+    else if(p.growth==='晩期'){ if(p.age<=24)bonus=Math.max(0,bonus-1); else if(p.age>=25&&gap>0)bonus+=Math.min(gap,ri(0,3)); if(p.age>=31)base+=1; }
     let delta=base+bonus;
     const up=delta>0;
     for(let i=0;i<Math.abs(delta);i++){
